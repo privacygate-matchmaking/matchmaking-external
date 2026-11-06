@@ -1,0 +1,17 @@
+.git
+.venv
+.packages
+.local
+runtime
+__pycache__
+**/__pycache__
+.env
+.env.*
+*.db
+*.sqlite*
+*.key
+*.pem
+app
+tools
+tests
+docs

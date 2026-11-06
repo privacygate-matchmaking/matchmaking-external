@@ -1,0 +1,28 @@
+# Overlay only. First file must be ../privacygate/compose.yaml.
+# No changes are made to matchmaking-internal or privacygate repositories.
+services:
+  external-api:
+    build:
+      context: ../matchmaking-external
+      dockerfile: external-api/Dockerfile
+      additional_contexts:
+        privacygate: .
+    environment:
+      SESSION_DB_PATH: /data/external-session/sessions.sqlite3
+      SESSION_KEY_FILE: /run/secrets/external_session_key
+      GATE_MODE: ${GATE_MODE:-enforce}
+    volumes:
+      - external-session-data:/data/external-session
+    secrets:
+      - external_session_key
+  transfer-api:
+    build:
+      context: ../matchmaking-external
+      dockerfile: transfer-api/Dockerfile
+      additional_contexts:
+        privacygate: .
+volumes:
+  external-session-data:
+secrets:
+  external_session_key:
+    file: ../matchmaking-external/.local/secrets/session.key
