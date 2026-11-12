@@ -5,6 +5,8 @@
 ## 구현 범위
 
 - 회원 화면: Keycloak 로그인, 제공 자료 목록·다운로드, 증빙 PDF 제출·상태, 제공 동의 등록·철회.
+- 매칭: 최소 소개 후보, 신청·수락·거절·취소·종료, 이용권·예약/사용 횟수, 상대별·항목별·기한별 공개 동의와 검토 결과 열람.
+- 이용권: 330만원(VAT 포함)·6개월·5회라는 프로젝트 시험 정책. 실제 결제 연결은 없고 별도 합성 실습 모드에서만 시험 결제를 활성화합니다.
 - 외부 BFF: OIDC Authorization Code + PKCE, 서버 세션, CSRF·Origin 검사, 토큰 갱신, 중계 API 호출.
 - 반출 중계: 파일 등록·검사, 신청·독립 승인·거절·철회, 동의 재확인, 승인 파일·버전·해시·수신자·만료 검사, 감사 기록.
 - 세션: 외부 전용 SQLite 볼륨, 토큰 별도 키 암호화. 브라우저에는 불투명한 세션 쿠키만 보냅니다.
@@ -13,6 +15,8 @@
 **현재 통합 제한:** 확인한 matchmaking-internal의 증빙·동의·제공 확인 등 업무 API 일부가 501 뼈대입니다. 전체 업무가 실제로 동작하려면 내부 담당자가 [연동 요구사항](docs/internal-handoff.md)을 구현해야 합니다. 자동 시험의 내부 서비스는 계약 검증용 대역이며 운영 코드에는 대체 성공 응답이 없습니다.
 
 ## 폴더 배치와 실행
+
+**매칭 기능 확인:** [실행·확인 가이드](docs/matching-run-guide.md) · [매칭·이용권 API와 내부 추가 요구사항](docs/matching-api.md) · [업무 정책](docs/matching-implementation-plan.md). 내부 `matching-directory`·`matching-disclosures` API 구현 전에는 명시적으로 켜는 합성 실습 모드로 확인할 수 있습니다. AI/OCR·사진/PDF 마스킹 엔진은 이번 범위가 아니며, 내부에서 승인한 공개용 텍스트 결과의 계약과 화면을 구현했습니다. 새 매칭 동의는 기존 소개 파일 동의와 아직 자동 연동되지 않습니다.
 
 세 저장소를 같은 상위 폴더에 둡니다.
 
@@ -63,9 +67,9 @@ external-session-data에는 세션, .local/secrets/session.key에는 암호화 �
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-격리된 자동 시험 43개가 통과했습니다. 실제 RSA 토큰 검증과 FastAPI 요청 흐름을 포함하며, 업무 흐름은 내부 API 응답 대역과 SQLite 시험 어댑터를 사용합니다. GitHub Actions에도 같은 시험을 구성했습니다.
+2026-11-12 기준 격리된 자동 시험 **68개**가 통과했습니다. 실제 RSA 토큰 검증과 FastAPI 요청 흐름을 포함하며, 업무 흐름은 내부 API 응답 대역과 SQLite 시험 어댑터를 사용합니다. 매칭권 동시 예약·중복 처리, 역할 밖 조작, 동의 철회·만료·관계 종료 후 열람 제한을 포함합니다. GitHub Actions에도 pytest 실행을 구성했습니다. Compose 병합 설정과 JavaScript 구문 검사를 통과했습니다. 이번 새 마이그레이션의 실제 PostgreSQL 실행 및 다중 회원 Keycloak 왕복, 화면 시각 검토는 아직 완료하지 않았습니다.
 
-2026-11-06 사용자 PC 확인: Docker 전체 컨테이너 실행, PostgreSQL 두 DB healthy, app_user 존재, users 4건·members 8건, Keycloak 설정 Exited(0), 외부 첫 화면 표시를 확인했습니다. Windows clone에서 공통 초기화 스크립트의 CRLF를 LF로 변환하고 중단된 DB 계정·시험 데이터 초기화를 이어서 실행했습니다. 실제 로그인·토큰 갱신·전체 업무 흐름·Wazuh 경보는 아직 확인 전입니다. DB 기동 확인을 실제 업무 트랜잭션 검증 완료로 해석하지 않습니다.
+이전 사용자 PC 확인: Docker 전체 컨테이너 실행, PostgreSQL 두 DB healthy, app_user 존재, users 4건·members 8건, Keycloak 설정 Exited(0), 외부 첫 화면을 확인했습니다. 이후 2026-11-09 회원 로그인·라운지 진입과 내부 API까지 요청 도달을 확인했습니다. 내부 증빙·동의 API의 501로 인한 안내는 남아 있습니다. 토큰 갱신·전체 업무 흐름·Wazuh 경보는 실제 통합 확인 전입니다. DB 기동 확인을 실제 업무 트랜잭션 검증 완료로 해석하지 않습니다.
 
 [구현 기준 연동 계약안 v0.4](docs/integration-decisions-v0.4.md) · [팀원 1 실행 가이드](docs/team1-run-guide.md)
 

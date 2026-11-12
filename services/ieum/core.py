@@ -40,8 +40,8 @@ def plain(row):
     return {k: iso(v) if isinstance(v, datetime) else str(v) if isinstance(v, UUID) else v for k, v in dict(row).items()}
 
 
-def deny(code='ACCESS_DENIED', reason='access_denied'):
-    raise GateError(ErrorCode(code), reason)
+def deny(code='ACCESS_DENIED', reason='access_denied', message=None):
+    raise GateError(ErrorCode(code), reason, message=message)
 
 
 def required(name):
@@ -84,7 +84,7 @@ def application(title, audit):
         audit.record(request, action, 'deny', exc.reason, target=getattr(request.state,'delivery_id',None))
         for kind,value in getattr(request.state,'audit_references',[]):
             audit.record(request,'delivery.reference','deny',kind+'_reference',target=value,target_type=kind)
-        return JSONResponse(error_body(exc.code, request.state.trace_id), status_code=exc.status)
+        return JSONResponse(error_body(exc.code, request.state.trace_id, message=exc.message), status_code=exc.status)
 
     @app.exception_handler(RequestValidationError)
     async def invalid(request, exc):

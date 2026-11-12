@@ -23,7 +23,9 @@ def create_app(config=None, identity=None, database=None, internal=None):
         'service_id':os.getenv('OIDC_CLIENT_ID','transfer-api'),'secret':required('OIDC_CLIENT_SECRET'),
         'internal':os.getenv('INTERNAL_API_URL','http://internal-api:8000'),
         'staging':os.getenv('STAGING_DIR','/data/transfer-staging'),'verified':os.getenv('VERIFIED_DIR','/data/transfer-verified'),
-        'audit':os.getenv('AUDIT_LOG_PATH','/var/log/matchmaking/transfer-api.json'),'mode':os.getenv('GATE_MODE','enforce')}
+        'audit':os.getenv('AUDIT_LOG_PATH','/var/log/matchmaking/transfer-api.json'),'mode':os.getenv('GATE_MODE','enforce'),
+        'matching_directory_mode':os.getenv('MATCHING_DIRECTORY_MODE','internal'),
+        'test_payments':os.getenv('ENABLE_TEST_PAYMENTS','false').lower()=='true'}
     if config['mode'] not in ('enforce','baseline'):
         raise RuntimeError('Invalid GATE_MODE')
     database=database or Database(config['database'])
@@ -84,6 +86,8 @@ def create_app(config=None, identity=None, database=None, internal=None):
             result=internal.request(method,path,headers=headers,**kwargs)
         except httpx.HTTPError:
             deny('INTERNAL_ERROR','internal_unavailable')
+        if result.status_code==501:
+            deny('INTERNAL_ERROR','internal_not_implemented','내부 업무 API가 아직 구현·연결되지 않았습니다. 담당자 연결 후 사용할 수 있습니다.')
         if result.status_code>=400:
             try:
                 code=result.json()['error']['code']
@@ -341,6 +345,8 @@ def create_app(config=None, identity=None, database=None, internal=None):
     def consent_revoke(consent_id: UUID,request: Request,body: Empty=Body(...),user=Depends(member)):
         return upstream('POST',f'/api/internal/my-consents/{consent_id}/revoke',request,json={}).json()
 
+    from .matching_routes import register_matching
+    register_matching(app,config,database,member,upstream,audit)
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)
     app.state.database,app.state.staff,app.state.member=database,staff,member

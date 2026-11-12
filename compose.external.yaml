@@ -21,6 +21,25 @@ services:
       dockerfile: transfer-api/Dockerfile
       additional_contexts:
         privacygate: .
+    environment:
+      MATCHING_DIRECTORY_MODE: ${MATCHING_DIRECTORY_MODE:-internal}
+      ENABLE_TEST_PAYMENTS: ${ENABLE_TEST_PAYMENTS:-false}
+    depends_on:
+      matching-migrate:
+        condition: service_completed_successfully
+  matching-migrate:
+    profiles: [external]
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${TRANSFER_DB_OWNER_PASSWORD:?}
+    command: ["psql", "-h", "transfer-db", "-U", "db_owner", "-d", "matchmaking_transfer", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", "/migrations/001_matching.sql"]
+    volumes:
+      - ../matchmaking-external/infra/migrations:/migrations:ro
+    networks: [transfer-db-net]
+    depends_on:
+      transfer-db:
+        condition: service_healthy
+    restart: "no"
 volumes:
   external-session-data:
 secrets:

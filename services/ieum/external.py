@@ -91,6 +91,7 @@ def create_app(config=None, identity=None, upstream=None):
 
     @app.get('/auth/callback')
     def callback(request: Request, code: str | None=None, state: str | None=None, error: str | None=None):
+        stage = 'flow'
         try:
             if not state or len(state)>200 or not code or len(code)>4096 or error:
                 deny('AUTH_REQUIRED','login_failed')
@@ -98,10 +99,14 @@ def create_app(config=None, identity=None, upstream=None):
             binding = request.cookies.get('external_login','')
             if not binding or not secrets.compare_digest(hashlib.sha256(binding.encode()).hexdigest(),flow['binding']):
                 deny('AUTH_REQUIRED','browser_mismatch')
+            stage = 'token_exchange'
             tokens = identity.token({'grant_type':'authorization_code','code':code,'code_verifier':flow['verifier'],
                                      'redirect_uri':config['base']+'/auth/callback'},config['client_id'],config['client_secret'])
+            stage = 'id_token'
             id_claims = identity.verify(tokens.get('id_token',''),config['client_id'],'external-web',flow['nonce'])
+            stage = 'access_token'
             claims = identity.verify(tokens['access_token'],'transfer-api','external-web')
+            stage = 'member'
             user = principal(claims)
             if user['role'] != 'member' or user['user_id'] != id_claims['sub']:
                 deny('ACCESS_DENIED','not_member')
@@ -111,8 +116,9 @@ def create_app(config=None, identity=None, upstream=None):
             audit.record(request,'login')
             response = RedirectResponse('/',302)
             response.set_cookie('external_session',sid,max_age=28800,path='/',httponly=True,secure=config['secure'],samesite='strict')
-        except GateError:
-            audit.record(request,'login','deny','login_failed')
+        except GateError as exc:
+            # Fixed stage and application reason only; never log tokens or callback inputs.
+            audit.record(request,'login','deny',f'{stage}:{exc.reason}')
             response = RedirectResponse('/?login=failed',302)
         response.delete_cookie('external_login',path='/auth')
         return response
@@ -138,6 +144,10 @@ def create_app(config=None, identity=None, upstream=None):
             result = upstream.request(method,path,headers=headers,**kwargs)
         except httpx.HTTPError:
             deny('INTERNAL_ERROR','transfer_unavailable')
+        if result.status_code == 401:
+            # This browser session was already verified by current(). A downstream
+            # authentication failure must not masquerade as an expired local session.
+            deny('INTERNAL_ERROR', 'upstream_auth_required')
         if result.status_code >= 400:
             try:
                 code = result.json()['error']['code']
@@ -145,7 +155,13 @@ def create_app(config=None, identity=None, upstream=None):
                 code = 'INTERNAL_ERROR'
             if code not in ('AUTH_REQUIRED','ACCESS_DENIED','APPROVAL_MISMATCH','APPROVAL_EXPIRED','CONSENT_INVALID','INVALID_STATE','NOT_FOUND','INVALID_REQUEST'):
                 code = 'INTERNAL_ERROR'
-            deny(code,'upstream_'+code.lower())
+            try:
+                message=result.json()['error'].get('message')
+            except (ValueError,KeyError,TypeError):
+                message=None
+            if not isinstance(message,str) or len(message)>200 or '\n' in message or '\r' in message:
+                message=None
+            deny(code,'upstream_'+code.lower(),message)
         return result
 
     @app.get('/api/me/deliveries')
@@ -196,6 +212,8 @@ def create_app(config=None, identity=None, upstream=None):
         audit.record(request,'consent.revoke')
         return result.json()
 
+    from .matching_bff import register_matching_bff
+    register_matching_bff(app,current,relay,audit)
     setattr(current,'__privacygate_policy__','roles:member')
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)

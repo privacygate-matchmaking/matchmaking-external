@@ -88,6 +88,16 @@ def env(tmp_path):
         if req.url.path=='/api/internal/disclosure-checks':
             return httpx.Response(200,json={'allowed':state['allowed'],'expires_at':state['consent_expires'],
               'member_pseudo_id':'M-001','recipient_pseudo_id':'M-B01'})
+        if state.get('matching') and req.url.path=='/api/internal/matching-directory':
+            from ieum.matching import synthetic_directory
+            subject={'MEMBER':B,'OTHER':C}.get(req.headers.get('X-User-Token'))
+            if not subject:return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
+            return httpx.Response(200,json=synthetic_directory(subject).model_dump(mode='json'))
+        if state.get('matching') and req.url.path=='/api/internal/matching-disclosures':
+            body=json.loads(req.content)
+            return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
+              {'scope':'employment','label':'재직','value':'합성 연구직','review_status':'reviewed','reviewed_at':iso(now())},
+              {'scope':'contact','label':'연락처','value':'SYNTHETIC-CONTACT','review_status':'reviewed','reviewed_at':iso(now())}]})
         if req.headers.get('X-User-Token')!='MEMBER':
             return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
         if req.url.path=='/api/internal/my-consents':
@@ -282,6 +292,20 @@ def test_audit_no_sensitive_values(env):
     for value in ['SVC_EXTERNAL','REFRESH','test-only','010-0000','합성 소개 자료','external_session']:
         assert value not in data
     assert 'requested_file_not_approved' in data
+
+
+def test_downstream_unauthorized_preserves_member_session(env):
+    login(env)
+    verify=env['id'].verify
+    def reject_service(token,*args,**kwargs):
+        if token=='SVC_EXTERNAL':
+            deny('AUTH_REQUIRED','invalid_token')
+        return verify(token,*args,**kwargs)
+    env['id'].verify=reject_service
+    response=env['e'].get('/api/me/deliveries')
+    assert response.status_code==500
+    assert response.json()['error']['code']=='INTERNAL_ERROR'
+    assert env['e'].get('/api/me').status_code==200
 
 
 def test_invalid_files_and_unknown_fields(env):

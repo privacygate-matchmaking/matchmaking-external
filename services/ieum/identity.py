@@ -48,15 +48,44 @@ class Identity:
                 if header['kid'] not in self._keys or time.time() - self._key_at > 300:
                     response = self.client.get(doc['jwks_uri'])
                     response.raise_for_status()
-                    self._keys = {j['kid']: jwt.PyJWK.from_dict(j).key for j in response.json()['keys']}
+                    # Keycloak also publishes encryption keys (e.g. RSA-OAEP).
+                    # Only parse keys eligible for the explicitly allowed RS256 verifier.
+                    self._keys = {
+                        j['kid']: jwt.PyJWK.from_dict(j, algorithm='RS256').key
+                        for j in response.json()['keys']
+                        if isinstance(j, dict)
+                        and isinstance(j.get('kid'), str) and j['kid']
+                        and j.get('kty') == 'RSA'
+                        and j.get('use') in (None, 'sig')
+                        and j.get('alg') in (None, 'RS256')
+                        and ('key_ops' not in j or 'verify' in j['key_ops'])
+                    }
                     self._key_at = time.time()
+            if header['kid'] not in self._keys:
+                deny('AUTH_REQUIRED', 'token_signing_key_missing')
             claims = jwt.decode(token, self._keys[header['kid']], algorithms=['RS256'],
                                 audience=audience, issuer=doc['issuer'], leeway=5,
                                 options={'require': ['exp', 'iss', 'aud', 'sub']})
-            if claims.get('azp') != azp or (nonce is not None and not secrets.compare_digest(str(claims.get('nonce', '')), nonce)):
-                raise ValueError()
+            if claims.get('azp') != azp:
+                deny('AUTH_REQUIRED', 'token_client_mismatch')
+            if nonce is not None and not secrets.compare_digest(str(claims.get('nonce', '')), nonce):
+                deny('AUTH_REQUIRED', 'token_nonce_mismatch')
             return claims
-        except (jwt.PyJWTError, ValueError, KeyError, TypeError, httpx.HTTPError):
+        except jwt.ExpiredSignatureError:
+            deny('AUTH_REQUIRED', 'token_expired')
+        except jwt.ImmatureSignatureError:
+            deny('AUTH_REQUIRED', 'token_not_yet_valid')
+        except jwt.InvalidAudienceError:
+            deny('AUTH_REQUIRED', 'token_audience_mismatch')
+        except jwt.InvalidIssuerError:
+            deny('AUTH_REQUIRED', 'token_issuer_mismatch')
+        except jwt.InvalidSignatureError:
+            deny('AUTH_REQUIRED', 'token_signature_invalid')
+        except jwt.MissingRequiredClaimError:
+            deny('AUTH_REQUIRED', 'token_missing_claim')
+        except httpx.HTTPError:
+            deny('AUTH_REQUIRED', 'token_key_fetch_failed')
+        except (jwt.PyJWTError, ValueError, KeyError, TypeError):
             deny('AUTH_REQUIRED', 'invalid_token')
 
     def token(self, data, client_id, secret):

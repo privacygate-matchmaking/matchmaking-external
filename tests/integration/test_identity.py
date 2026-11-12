@@ -42,3 +42,34 @@ def test_wrong_signature_rejected(signing):
     other=rsa.generate_private_key(public_exponent=65537,key_size=2048)
     token=jwt.encode(claims,other,algorithm='RS256',headers={'kid':'test-key'})
     with pytest.raises(GateError):identity.verify(token,'transfer-api','external-web')
+
+
+def test_keycloak_jwks_with_encryption_key(signing):
+    key,_,claims=signing
+    signing_key=json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    signing_key.update(kid='signing-key',use='sig',alg='RS256')
+    encryption_key={**signing_key,'kid':'encryption-key','use':'enc','alg':'RSA-OAEP-256'}
+    def handle(req):
+        if req.url.path=='/jwks':
+            return httpx.Response(200,json={'keys':[encryption_key,signing_key]})
+        return httpx.Response(200,json={'issuer':'https://id.test','jwks_uri':'https://id.test/jwks',
+          'authorization_endpoint':'https://id.test/auth','token_endpoint':'https://id.test/token',
+          'end_session_endpoint':'https://id.test/logout'})
+    identity=Identity('https://id.test/discovery',httpx.Client(transport=httpx.MockTransport(handle)))
+    token=jwt.encode(claims,key,algorithm='RS256',headers={'kid':'signing-key'})
+    assert identity.verify(token,'transfer-api','external-web','expected')['sub']==claims['sub']
+    assert set(identity._keys)=={'signing-key'}
+
+
+def test_encryption_key_cannot_be_used_for_signing(signing):
+    key,_,claims=signing
+    encryption_key=json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
+    encryption_key.update(kid='encryption-key',use='enc',alg='RSA-OAEP-256')
+    def handle(req):
+        if req.url.path=='/jwks':return httpx.Response(200,json={'keys':[encryption_key]})
+        return httpx.Response(200,json={'issuer':'https://id.test','jwks_uri':'https://id.test/jwks',
+          'authorization_endpoint':'https://id.test/auth','token_endpoint':'https://id.test/token',
+          'end_session_endpoint':'https://id.test/logout'})
+    identity=Identity('https://id.test/discovery',httpx.Client(transport=httpx.MockTransport(handle)))
+    token=jwt.encode(claims,key,algorithm='RS256',headers={'kid':'encryption-key'})
+    with pytest.raises(GateError):identity.verify(token,'transfer-api','external-web')
