@@ -12,7 +12,7 @@ Keycloak 26.0.7의 `keycloak` 테마를 상속해 색상·간격·로고·장식
 
 ## 적용 방법
 
-기존 PowerShell의 `$composeArgs`가 공통·외부·합성 실습 Compose 세 파일을 포함한 상태라면 다음을 실행한다.
+[실행 가이드](team1-run-guide.md)에 따라 현재 선택한 모드의 Compose 인수를 준비한 뒤 적용합니다. 아래는 Windows PowerShell 예이며 Mac은 `@composeArgs` 대신 `"${composeArgs[@]}"`를 사용합니다.
 
 ```powershell
 docker compose @composeArgs up -d keycloak member-theme-setup
@@ -28,6 +28,6 @@ docker compose @composeArgs logs --tail 30 member-theme-setup
 
 ## 확인 상태
 
-Compose 병합 및 테마 파일 구문을 검사한다. 실제 Keycloak 렌더링과 로그인 왕복은 로컬 Docker에서 확인해야 한다. 테마 적용 실패 시 `member-theme-setup` 로그를 먼저 확인한다. 인증이 실패하면 오류 문구를 숨기거나 인증 검사를 우회하지 않는다.
+Compose 병합 및 테마 파일 구문을 확인했습니다. 사용자 PC에서 전체 화면 확인은 마쳤지만 Mac의 테마 렌더링과 로그인 왕복은 별도 확인해야 합니다. 테마 적용 실패 시 `member-theme-setup` 로그를 먼저 확인한다. 인증이 실패하면 오류 문구를 숨기거나 인증 검사를 우회하지 않는다.
 
 공식 구현 방식: [Keycloak 테마 가이드](https://www.keycloak.org/ui-customization/themes).

@@ -1,82 +1,138 @@
-# 내부 담당자 연동 요구사항
+# 외부 변경 정리 — 내부(internal-api·internal-web) 담당 전달용
 
-이 문서는 외부 저장소의 현재 구현 계약입니다. 내부 저장소 코드·README는 수정하지 않았습니다. upstream에서 미구현인 업무 응답은 아래 형식으로 맞춰야 실제 업무가 연결됩니다. API 경로는 기존 설계를 따르고, 미정이던 응답 필드·세션 저장·비교 모드의 범위를 구체화했습니다.
+이번 외부(external-web·external-api·transfer-api) 변경 중 **내부 연결에 필요한 내용만** 정리했습니다.
+기준일: 2026-11-13. 내부 `e2c5648`, 공통 `fcdb992`와 내부 `docs/external-handoff.md` 기준입니다. 내부·공통 저장소의 코드는 수정하지 않았습니다.
 
-## 1. 내부에 필요한 고정 API
+반영 상태는 **코드 반영 / 활성화 대기 / 정책 합의 대기 / 추가 구현 필요**로 구분했습니다. 자세한 실행은 [팀원 1 실행 가이드](team1-run-guide.md)를 함께 전달해 주세요.
 
-중계는 transfer-api 서비스 토큰을 보냅니다. 회원 업무에는 X-User-Token을 함께 보냅니다. 내부는 두 토큰을 검증하고 회원 주체를 토큰에서 결정해야 합니다.
+## 0. 먼저 할 일 (실행 환경)
 
-### POST /api/internal/disclosure-checks
+1. 세 저장소를 같은 부모 폴더에 두고 기존 내부 작업은 보존합니다.
+2. 외부 `scripts/initialize.py`가 세션 키를 보존하고, 필요한 `INTERNAL_ADMIN_CLIENT_SECRET`을 `.local/internal-admin.env`에 준비합니다. 공통 `.env`나 셸에 기존 값이 있으면 그것을 우선합니다. Compose에는 두 환경 파일을 함께 전달합니다.
+3. `MEMBER_NOTICE_DAYS`는 현재 공통 Compose 기본값 30일을 따릅니다. 외부가 내부 삭제 작업이나 기간을 직접 관리하지 않습니다.
+4. 중계 DB에는 `001_matching.sql`과 `002_meetings.sql`의 추가 테이블을 적용합니다. 기존 데이터 삭제는 하지 않습니다. 내부 최신 DB 적용/새 시드 초기화는 내부 담당자와 따로 결정합니다.
+5. 일반 실행에 `down -v`를 사용하지 않습니다. 내부 문서의 전체 초기화는 기존 DB·Keycloak·증빙을 지우므로 별도 합의·백업 후 판단해야 합니다.
 
-입력:
-```json
-{
-  "member_id": "<정보 주체 member UUID>",
-  "recipient_id": "<수신자 user UUID>",
-  "consent_id": "<동의 UUID>",
-  "purpose": "introduction",
-  "item": "profile"
-}
-```
+## 1. 계정·로그인 (Keycloak)
 
-허용 응답:
-```json
-{"allowed":true,"expires_at":"2026-12-01T00:00:00Z","member_pseudo_id":"M-001"}
-```
+- **반영:** JWKS에서 `use=sig`인 RSA 서명 키만 읽습니다. RS256·issuer·audience·azp 검증을 유지합니다.
+- 직원·회원 계정과 OTP 정책은 내부/공통 설정을 따릅니다. 외부가 별도 역할이나 `super_admin`을 추가하지 않았습니다.
+- 회원 클라이언트 `external-web`에만 이음 디자인 `ieum-members`를 적용합니다. 내부 직원 테마·master 관리 로그인은 바꾸지 않았습니다.
+- 토큰 갱신이 인증 거절되면 외부 세션을 폐기합니다. 직원 역할 회수의 즉시 반영은 모든 중계 API에서 완성된 상태가 아닙니다. 새 일정 API에는 현재 담당 관계 확인 계약을 추가했습니다.
 
-거부 응답은 {"allowed":false} 또는 공통 403 오류입니다. 조회 실패·미구현을 허용으로 해석하지 않습니다. 내부에서 주체·수신자 관계, 해당 동의의 정보 주체/수신자/항목/목적/철회·만료를 확인해야 합니다. expires_at은 유효한 동의의 만료이며 member_pseudo_id는 파일의 정보 주체와 연결하는 가명입니다. 신청·승인·다운로드마다 다시 호출합니다.
+## 2. 코드 규칙·표시
 
-### 증빙
+- **반영:** 기존 동의 화면은 `counterpart_label`을 사용합니다. 내부 관리자용 회원 코드를 이름처럼 표시하지 않습니다.
+- 외부 유료 매칭의 최소 프로필에는 별도 `pseudo_id` 계약이 남아 있습니다. 합성 실습의 M-B01 등은 내부 A-003 등과 다른 시험 별칭입니다. 실제 연결 시 관리자 코드 대신 공개 별칭을 줄지, `counterpart_label`로 응답을 통일할지 합의해야 합니다.
+- `user_id`(Keycloak sub)와 `member_id`(업무 회원 UUID)를 구분합니다. 직원용 일정 응답은 회원 화면에 재사용하지 않습니다.
 
-- POST /api/evidence-files: multipart file(PDF), 주체는 회원 토큰. 성공 201, 최소 file_id 및 status를 반환하도록 합의가 필요합니다.
-- GET /api/internal/my-evidence-files: {items:[{file_id,status,created_at,review_result}]}.
-- 상태 예: submitted, in_review, reviewed, deleted. review_result는 선택입니다.
-- 외부·중계는 원본을 영구 보관하지 않습니다. 내부가 암호화·열람 권한·삭제 기한을 담당합니다. PDF magic/크기 확인은 포맷 검사의 전부가 아니므로 내부에서 유효성 및 보관 정책을 수행해야 합니다.
+## 3. 시험 데이터 (시드)
 
-### 동의
+- 내부 문서의 새 기준은 회원 20명, member_b=A-003이며 상담 직원별 10명 담당입니다.
+- 외부 독립 실습은 B/C/D/E 합성 계정 4명을 사용합니다. C/D/E는 Keycloak 시험 계정이며 내부 업무 DB 회원으로 자동 등록되지 않습니다.
+- **연동 미확인:** 외부 PC의 내부 업무 DB는 기존 상태를 보존했습니다. 새 20명 시드와 학력 심사→매칭 전 과정을 실제 연결했다고 보지 않습니다.
+- 두 모드를 섞지 않고 실제 내부 데이터 시험과 합성 매칭 실습을 구분합니다.
 
-- GET /api/internal/my-consents:
-```json
-{
-  "items":[{"consent_id":"<UUID>","counterpart_pseudo_id":"M-001","item":"profile","purpose":"introduction","expires_at":"2026-12-01T00:00:00Z","revoked_at":null}],
-  "counterparts":[{"counterpart_member_id":"<UUID>","counterpart_pseudo_id":"M-001"}]
-}
-```
-- counterparts는 회원에게 허용된 소개 상대만 포함합니다. 없으면 외부 화면의 새 동의 등록을 비활성화합니다.
-- POST /api/internal/my-consents: counterpart_member_id, item, purpose, expires_at → 201 {consent_id,...}.
-- POST /api/internal/my-consents/{consent_id}/revoke: {} → {consent_id,revoked_at}.
-- 내부에서 본인 소유 및 관계를 확인합니다. 전달된 상대 UUID만으로 동의를 생성하면 안 됩니다.
+## 4. 회원 매칭 (현재 차이·월요일 결정 필요)
 
-## 2. 내부 생성 파일의 반출 등록
+| 항목 | 내부 구현 | 외부 구현 |
+|---|---|---|
+| 시작 | 직원이 소개한 상대에게 매칭 버튼 | 소개 후보에게 유효 이용권으로 신청 |
+| 성사 | 두 사람이 서로 누름 | 신청을 상대가 수락 |
+| 학력 조건 | 학력 승인 후 가능 | 내부가 내려줄 `eligible`로 통제할 계약. 합성 모드는 시험값 |
+| 이용권 | 전달 문서에 유료 횟수 처리 없음 | 시험 상품 330만원·6개월·5회. 실제 결제 없음 |
+| 개인정보 동의 | 성사 시 profile/introduction/30일 양방향 자동 생성 | 성사 후 소유자가 상대·항목·기간을 별도 동의, 최대 7일 |
+| 기존 반출 동의 | 내부 consents가 기준 | 매칭용 matching_grants와 별개. 자동 동기화 없음 |
+| 응답 기한 | 첨부 기획의 24시간과 별도 결정 필요 | 현재 72시간 |
+| 일정 | 내부 직원 화면 추가 연결 필요 | 후보 제안·회원 응답·직원 확정 API/회원 UI/직원 UI 부품 구현 |
 
-내부 내보내기 기능이 생성한 파일은 브라우저 공개 경로에 두지 않습니다. 내부 백엔드가 소유한 파일을 읽어 POST /api/transfer-files에 multipart로 전송하고 반환된 file_id를 연결합니다. 로컬 파일 경로나 DB·볼륨을 외부에 공유하지 않습니다. 중계 등록 호출에는 해당 counselor의 직원 토큰을 전달합니다.
+**기존 유료 매칭을 유지하고 내부 자동 매칭·동의는 합의 후 연결하는 것으로 보류했습니다.** 내부 `my-matches`를 외부 `/api/me/matches`에 그대로 붙이면 입력과 의미가 충돌합니다.
 
-현재 등록 주체는 counselor로 제한했습니다. data_admin의 정상 전체 내보내기는 내부에서 별도로 수행합니다. baseline에서 counselor가 확보한 합성 CSV는 반출 신청·승인 없이 차단된 대기 파일로 등록할 수 있습니다. 정상 최소 소개 JSON은 별도로 등록·신청·승인합니다. 관리자 API의 권한 검사 누락/적용 비교 구현은 내부 담당 범위입니다.
+현재 횟수 정책:
+- 신청 시 1회 예약, 상대 수락 시 발신자 1회 사용 확정.
+- 수락 전 취소·거절·72시간 만료는 예약 해제. 성사 후 종료는 사용한 1회 유지.
+- 일정 변경·취소·변심에 **추가 횟수 차감이나 취소 수수료는 없습니다.** 이미 사용한 1회 유지와 추가 벌점은 다릅니다.
 
-## 3. 다운로드 비교의 정확한 범위
+월요일 논의안: **내부 소개 대상·학력 심사 결과를 기준으로, 외부 이용권·신청 제한·일정 조율을 연결하는 방향**을 제안합니다. 최종 매칭/동의의 기준 DB와 취소 시 철회 범위는 함께 결정해야 합니다. 자동 동의를 적용하더라도 원본 증빙·연락처까지 한꺼번에 공개하는 것으로 확대하지 않습니다.
 
-delivery_id → approval_id → approved_file_id 연결은 DB가 보관합니다. B의 유효한 정상 제공 건은 유지하고 query file_id만 다른 합성 대기 파일 UUID로 변경합니다.
+챗봇은 미구현입니다. 우선 안내·일정 후보 정리 보조 정도가 적절하며, 도입 여부와 범위를 논의할 수 있습니다. 동의·반출 승인·연락처 공개는 서버 검사를 거치도록 유지합니다. 챗봇을 추가하면 개인정보 노출·권한 오남용에 대한 방어 검증을 별도 시나리오로 넣을지도 논의할 수 있습니다. 기존 두 핵심 시나리오의 완성을 우선할지는 일정과 함께 정합니다.
 
-- baseline: 정상 승인·수신자·동의·만료·승인 파일 무결성 검증 후 요청 대상 선택의 연결 검사만 빠집니다.
-- enforce: 요청 file_id가 승인 파일과 다르면 403 APPROVAL_MISMATCH, 바이트 미반환.
-- 변경값을 무시하고 승인 파일을 200으로 반환하는 방식은 사용하지 않습니다.
-- 내부 공격 차단 후 외부 공격을 독립 시험할 때는 합성 대기 파일을 미리 준비했음을 표시합니다.
+## 5. 증빙 종류
 
-## 4. 인증·현재 권한·추적
+- **반영:** 회원 화면에 졸업/재직 선택을 추가했습니다.
+- external-api → transfer-api → internal-api까지 multipart `kind=education/employment`를 전달합니다. 생략은 education, 미지원 값은 422입니다.
+- 원본 암호화·직원 심사·삭제는 내부 담당입니다. 외부가 원본을 다른 회원에게 직접 제공하지 않습니다.
+- AI/OCR 진위 검증·자동 마스킹은 구현하지 않았습니다. 현재 매칭 상세 결과는 검토 완료된 공개용 **텍스트**를 받는 계약이며 사진·PDF 공개 계약은 별도입니다.
 
-네 역할은 member / counselor / approver / data_admin입니다. approver는 유지하며 자기 신청 승인을 거부합니다.
+## 6. 소개 자료 (먼저 맞춰야 할 문제)
 
-JWT 역할 변경은 토큰 재발급 전까지 과거 값일 수 있습니다. 내부 BFF에서 현재 직원 활성 상태·업무 권한을 검사해야 합니다. 현재 중계는 유효 JWT를 검증하며 즉시 권한 회수는 아직 보장하지 않습니다. 즉시 강제가 요구되면 별도의 현재 권한 조회 계약을 함께 추가해야 합니다.
+내부 `_detail_profile()` 파일의 `member_pseudo_id`는 **실명**, `disclosure_check()`의 같은 필드는 **회원 코드**입니다. 중계는 동의한 주체와 파일 주체를 비교하므로 `profile_subject_mismatch`로 정상 반출이 거부될 수 있습니다.
 
-외부 BFF 세션은 SQLite + 전용 볼륨, 토큰 암호화 키는 로컬 Docker secret으로 결정했습니다. 외부 세션을 업무 DB에 넣지 않습니다. 외부→중계의 trace_id는 인증된 서비스 요청에서만 32자리 hex로 전달받습니다. 중계→내부도 헤더를 전달하지만 내부 middleware가 새 ID를 생성하면 추적이 끊기므로 팀 간 조정이 필요합니다.
+**확인 필요:** 표시 이름과 별개인 안정적인 member UUID로 파일과 동의를 결합하는 방향을 권장합니다. 4필드 파일 형식을 당장 유지하려면 최소한 두 응답의 의미가 같아야 합니다. 스키마 버전과 중계 검사도 함께 변경해야 하며, 외부에서 주체 검사를 삭제하지 않았습니다. 실명만 같다고 동일 주체가 보장되지는 않습니다.
 
-감사 로그에는 가명 주체·결과·사유 코드만 기록합니다. 다운로드 거부 주 이벤트는 delivery ID, 별도 delivery.reference 이벤트는 승인/요청 파일 ID를 같은 trace_id로 연결합니다. 개인정보 본문·토큰은 기록하지 않습니다. Wazuh 상관 규칙은 참고 이벤트를 반복 요청 횟수로 중복 계산하면 안 됩니다.
+기존 반출 계약: 내부 서버가 파일 바이트를 `POST /api/transfer-files`로 보내 file_id를 받습니다. 서버 경로나 볼륨을 공유하지 않습니다. 신청·승인·다운로드 시 내부 `POST /api/internal/disclosure-checks`로 현재 동의를 재확인합니다. delivery_id로 승인 문맥을 찾고 요청 file_id가 승인 파일과 다르면 enforce에서 403으로 거부합니다.
 
-## 5. 연결 직전 공동 확인
+연락처 최종 승인·양쪽 전달은 **후속 구현**입니다. 일정 확정이 연락처 전송을 자동 실행하지 않습니다.
 
-- 실제 내부 업무 API의 위 응답 및 오류 형식.
-- 두 Compose 파일을 합친 빌드, 세션 키·볼륨 권한, PostgreSQL 스키마.
-- 공개 Keycloak issuer/redirect URI와 컨테이너용 discovery/token/JWKS 주소.
-- 내부 현재 권한 반영 방식, 동의 철회 후 다음 다운로드 차단.
-- 로컬 호스트 시험과 두 노트북 물리 연결의 범위 구분.
-- 합성 자료만 사용하여 정상/비정상 요청을 동일 조건에서 재시험.
+## 7. 회원 탈퇴·탈퇴 안내
+
+- **외부 코드 반영 / 실제 활성화·내부 연결 시험 대기.**
+- 로그인 후 상태 우선 확인, 비활성 시 업무 화면 숨김, 안내 문구 표시, 본인 신청만 철회, 직원 처리 건 철회 불가를 반영했습니다.
+- `withdrawn`은 안내를 유지하며 외부 세션을 종료합니다. 신청 사유는 200자 이하이고 로그에 사유 본문을 남기지 않습니다.
+- 기본 `MEMBER_STATUS_CHECK=false`는 이전 내부 실행 보존용입니다. 이때 새 탈퇴 신청/철회 쓰기는 409로 거부됩니다.
+- 최신 내부 DB·API가 준비되면 `compose.member-lifecycle.yaml`로 두 외부 서비스를 활성화합니다. 회원 상태 API 실패를 active로 취급하지 않습니다.
+- 합성 실습 파일과 lifecycle 파일은 함께 쓰지 않습니다. 7일 삭제 작업·안내 기간·Keycloak 계정 삭제는 내부에서 수행합니다.
+
+## 8. API·직원 화면 연결 요청
+
+서비스 토큰과 `X-User-Token`, 브라우저 변경 요청의 CSRF·Origin 검사를 유지합니다.
+
+| 외부 BFF | 중계 | 내부 | 상태 |
+|---|---|---|---|
+| GET /api/me/status | GET /api/internal/member-status | GET /api/internal/my-status | 외부 반영, 활성화 대기 |
+| POST /api/me/withdrawal | POST /api/internal/member-withdrawal | POST /api/internal/my-withdrawal | 외부 반영, 활성화 대기 |
+| POST /api/me/withdrawal/cancel | POST /api/internal/member-withdrawal/cancel | POST /api/internal/my-withdrawal/cancel | 외부 반영, 활성화 대기 |
+| 기존 유료 /api/me/matches | /api/internal/matching/requests | 내부 my-matches와 직접 연계 없음 | 정책 합의 대기 |
+
+현재 유료 방식을 유지할 경우 아래 내부 계약이 필요합니다. 내부 방식으로 바꾸면 그대로 새 API를 모두 만들기보다 기존 구현 재사용과 외부 어댑터 변경을 먼저 합의합니다.
+
+| 요청 | 목적 | 상세 |
+|---|---|---|
+| POST /api/internal/matching-directory | 본인/소개 상대의 최소 프로필·user/member UUID·신청 가능 여부 | [매칭 API](matching-api.md) |
+| POST /api/internal/matching-disclosures | 매칭·항목 동의에 맞는 현재 검토 결과, 원본 제외 | [매칭 API](matching-api.md) |
+| POST /api/internal/matching-staff-checks | 직원 현재 활성·상담 역할·담당 관계 확인 | [일정 명세](meeting-scheduling.md) |
+| 내부 직원 BFF 5개와 일정 화면 연결 | 목록/조회/후보 제안/최종 확정/취소 | [일정 명세](meeting-scheduling.md) |
+
+담당 확인 요청은 `{participant_user_ids:[UUID,UUID],purpose:"meeting_schedule",action:"read|propose|confirm|cancel"}`, 응답은 `{allowed:boolean,assigned_user_ids:[실제 담당 user UUID]}`입니다. 서비스 토큰 외에 직원 토큰도 검증해야 합니다. 한 명 이상 담당 시 일정 조율을 허용하되 담당 밖 회원의 개인 의견은 숨기는 현재 계약도 함께 확인해 주세요.
+
+직원용 화면 부품은 `integrations/internal-scheduling/panel.js`에 있습니다. 실제 직원 앱에 자동 삽입하지 않았습니다. 내부 확인 API가 없으면 실제 모드는 거부합니다.
+
+## 9. Wazuh (실제 확인 결과)
+
+| 규칙 | 내용 | 확인 |
+|---|---|---|
+| 100110 / 100112 | 관리자 내보내기 거부 / 같은 계정 60초 내 3건 반복 | 실제 엔진·순차 합성 시험 통과 |
+| 100111 | 승인 파일·수신자 불일치 | 동일 |
+| 100120 | 파일 무결성 오류 | 동일 |
+| 100130 | 매칭 응답 소유자 권한 위반 | 동일 |
+| 100140 | member_purge / error | 동일 |
+| 100141 | evidence_delete / error | 동일 |
+| 100142 | member_account_delete / error / not_member_account | 동일 |
+
+실제 규칙 엔진 12개 사례와 합성 이벤트 12건의 수집→예상 규칙→Indexer 검색을 확인했습니다. 일반 allow/deny도 감사 기록으로 수집합니다. 담당 밖 접근 반복 등 모든 제안에 별도 전용 경보가 있는 것은 아닙니다.
+
+**남은 한계:** 일괄 입력에서는 반복 경보가 누락됐고, 3초 간격 시험은 통과했습니다. 동시 입력 반복 탐지는 추가 확인이 필요합니다. 현재 smoke는 순차 입력 검증입니다. 경보 통과가 실제 웹 공격 차단·유출 방지 전체 시연 완료를 뜻하지 않습니다.
+
+Dashboard는 localhost:8444, 검색 데이터 7일·2GiB 예산이며 자동 계정/IP 차단은 없습니다. 상세는 [Wazuh 가이드](wazuh-run-guide.md)에 있습니다.
+
+## 10. 시험·월요일 결정 순서
+
+확인: 일정 추가 후 Python 109개·Node 9개 통과. 이후 관제 진단 변경은 관제 도구 21개 재시험 통과. 사용자 PC에서 중계 DB 백업·일정 테이블 적용·외부/중계 기동·화면 확인·최신 Wazuh 순차 수집 검증을 완료했습니다. 내부 API 자동 시험에는 대역을 사용했으며 Mac 실행은 아직 확인하지 않았습니다.
+
+월요일에는 아래 순서로 결정하면 됩니다.
+1. 매칭 성사 방식과 기준 DB: 내부 상호 클릭에 외부 이용권/일정을 붙일지, 외부 신청/수락을 기준으로 할지.
+2. 공개 동의: 자동 생성/개별 동의, 공개 항목·기간, 취소 시 기존 파일 승인까지 철회할지.
+3. 정상 소개 파일의 주체 값 통일과 후보/검토 결과·담당 확인 API 연결.
+4. 수락 전/성사 후/일정 취소의 횟수 정책, 응답 기한 24시간 또는 현재 72시간. 현재는 추가 차감 없음.
+5. 연락처 최종 승인 전달, 챗봇 보조 기능·방어 검증을 이번 범위에 넣을지.
+6. 내부 DB·시험 계정 적용 방법을 정한 뒤 정상 업무·두 핵심 비교 시나리오·관제 기록을 함께 검증.

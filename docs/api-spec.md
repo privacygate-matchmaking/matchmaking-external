@@ -1,4 +1,6 @@
-# 외부·중계 API (v0.3)
+# 외부·중계 API
+
+2026-11-13 기준. 로그인·증빙·동의·반출 경로를 정리합니다. [매칭 API](matching-api.md), [일정 API](meeting-scheduling.md), [회원 상태·탈퇴 경로](internal-handoff.md)를 함께 확인합니다.
 
 모든 ID는 UUID, 시각은 시간대 포함 ISO 8601입니다. JSON 모델의 미정의 필드는 422입니다. 오류는 {"error":{"code":"APPROVAL_MISMATCH","message":"…","trace_id":"…"}} 형태입니다. 401 인증, 403 정책 거부, 404 대상 없음, 409 상태 충돌, 422 입력 오류, 500 의존 서비스/내부 오류를 사용합니다.
 
@@ -10,12 +12,12 @@
 |---|---|---|
 | GET /auth/login | 없음 | Keycloak 리다이렉트 |
 | GET /auth/callback | code, state | 세션 생성 후 / 리다이렉트 |
-| GET /api/me | 없음 | user_id, pseudo_id, role, csrf_token, gate_mode |
+| GET /api/me | 없음 | user_id, pseudo_id, role, csrf_token, gate_mode, member_status_check, meeting_scheduling |
 | POST /auth/logout | {} | logout_url |
 | GET /api/me/deliveries | 없음 | {items:[제공 건]} |
 | GET /api/me/deliveries/{delivery_id}/download | 선택 query file_id | 파일 또는 403 |
 | GET /api/me/evidence-files | 없음 | {items:[증빙 상태]} |
-| POST /api/me/evidence-files | multipart file(PDF, 2MiB 이하) | 내부 접수 응답, 201 |
+| POST /api/me/evidence-files | multipart file(PDF, 2MiB 이하), kind=education/employment(기본 education) | 내부 접수 응답, 201 |
 | GET /api/me/consents | 없음 | {items:[동의], counterparts:[허용 상대]} |
 | POST /api/me/consents | 동의 모델 | 내부 생성 응답, 201 |
 | POST /api/me/consents/{consent_id}/revoke | {} | 내부 철회 응답 |
@@ -51,7 +53,7 @@ Authorization: Bearer external-api 서비스 토큰 및 X-User-Token: 회원 acc
 | POST /api/internal/delivery-queries | {} |
 | GET /api/internal/deliveries/{delivery_id}/download | 선택 query file_id |
 | GET /api/internal/evidence-submissions | 없음 |
-| POST /api/internal/evidence-submissions | multipart file |
+| POST /api/internal/evidence-submissions | multipart file, kind=education/employment(기본 education) |
 | GET /api/internal/member-consents | 없음 |
 | POST /api/internal/member-consents | 동의 모델 |
 | POST /api/internal/member-consents/{consent_id}/revoke | {} |

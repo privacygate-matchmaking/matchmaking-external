@@ -1,5 +1,7 @@
 # Wazuh 연동·검증 가이드
 
+일반 앱 실행은 [팀원 1 실행 가이드](team1-run-guide.md), 팀 간 요청은 [내부 전달 파일](internal-handoff.md)에 있습니다. 아래 PowerShell 예는 Windows 기준이며 Mac의 Python 경로는 `.venv/bin/python`입니다. Mac 고정 이미지 실행은 아직 검증하지 않았습니다.
+
 ## 구현한 구조
 
 현재 PC의 기존 `matchmaking` 앱과 별개인 `ieum-wazuh` Compose 프로젝트다. 선택적으로 실행하며 정지해도 앱은 정지하지 않는다.
