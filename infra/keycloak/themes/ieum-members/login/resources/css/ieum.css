@@ -1,0 +1,207 @@
+/* IEUM member login. Inherit Keycloak's form markup and authentication behavior. */
+:root {
+  --ieum-ink: #1c332e;
+  --ieum-green: #173e37;
+  --ieum-muted: #68766d;
+  --ieum-border: #dce1d8;
+  --ieum-paper: #fbfcf9;
+}
+html.login-pf, .login-pf body {
+  min-height: 100%;
+  background: var(--ieum-paper) none !important;
+  color: var(--ieum-ink);
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  line-height: 1.7;
+}
+body::before {
+  content: "이음 결혼정보회사 · 가상 기업 · 교육용 시제품";
+  display: block;
+  padding: 9px 20px;
+  background: var(--ieum-green);
+  color: #e1e8d9;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: .05em;
+}
+.login-pf-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 80px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 75px 36px 85px;
+}
+#kc-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 260px;
+  text-align: left;
+  background: url("../img/connection.svg") left bottom / min(100%, 430px) auto no-repeat;
+}
+#kc-header-wrapper {
+  order: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  color: var(--ieum-ink);
+  font-size: 30px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: -1px;
+  white-space: normal;
+}
+#kc-header-wrapper::before {
+  content: "이";
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50% 50% 5px 50%;
+  background: var(--ieum-green);
+  color: white;
+  font-size: 19px;
+  font-weight: 500;
+}
+#kc-header-wrapper span {
+  font-size: 10px;
+  letter-spacing: 3px;
+  font-weight: 400;
+  margin-left: 3px;
+}
+#kc-header::before {
+  content: "A CONNECTION, WITH CARE";
+  order: 1;
+  margin-top: 85px;
+  color: var(--ieum-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2.2px;
+}
+#kc-header::after {
+  content: "좋은 인연의 시작,\A 안심할 수 있는 이음.";
+  order: 2;
+  margin-top: 24px;
+  color: var(--ieum-ink);
+  white-space: pre-line;
+  font-size: clamp(27px, 3vw, 37px);
+  line-height: 1.65;
+  letter-spacing: -1.5px;
+  font-weight: 400;
+}
+.login-pf-page .card-pf {
+  width: 100%;
+  max-width: 460px;
+  margin: 83px 0 0;
+  padding: 34px 36px;
+  border: 1px solid var(--ieum-border);
+  border-radius: 5px;
+  background: white;
+  box-shadow: 0 12px 35px #243c2d05;
+}
+.login-pf-page .login-pf-header { margin-bottom: 28px; text-align: left; }
+#kc-page-title {
+  margin: 15px 0 8px;
+  color: var(--ieum-ink);
+  text-align: left;
+  font-size: 27px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: -.8px;
+}
+#kc-form-wrapper::before {
+  content: "회원 계정으로 로그인하고 나의 라운지로 이동하세요.";
+  display: block;
+  margin: 0 0 26px;
+  color: var(--ieum-muted);
+  font-size: 12px;
+  line-height: 1.9;
+}
+#kc-form-wrapper::after {
+  content: "공용 PC에서는 이용 후 반드시 로그아웃해주세요.";
+  display: block;
+  margin-top: 26px;
+  padding-top: 19px;
+  border-top: 1px solid var(--ieum-border);
+  color: var(--ieum-muted);
+  font-size: 11px;
+  line-height: 1.9;
+}
+.login-pf-page label, .login-pf-page .pf-c-form__label {
+  color: var(--ieum-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+.login-pf-page .form-group { margin-bottom: 21px; }
+.login-pf-page .pf-c-form-control, .login-pf-page .form-control {
+  min-height: 47px;
+  padding: 11px 13px;
+  border: 1px solid var(--ieum-border);
+  border-radius: 3px;
+  background: var(--ieum-paper);
+  color: var(--ieum-ink);
+  font-size: 14px;
+  box-shadow: none;
+}
+.login-pf-page .pf-c-form-control:focus, .login-pf-page .form-control:focus {
+  border-color: #638578;
+  box-shadow: 0 0 0 3px #63857824;
+}
+.login-pf-page input[aria-invalid="true"] { border-color: #ae5646; }
+.login-pf-page .pf-c-input-group > .pf-c-form-control { border-radius: 3px 0 0 3px; }
+.login-pf-page .pf-c-input-group .pf-c-button.pf-m-control {
+  min-width: 46px;
+  border: 1px solid var(--ieum-border);
+  border-left: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--ieum-paper);
+  color: var(--ieum-muted);
+}
+.login-pf-page .pf-c-input-group .pf-c-button.pf-m-control::after { border: 0; }
+#kc-login, .login-pf-page .pf-c-button.pf-m-primary, .login-pf-page .btn-primary {
+  min-height: 48px;
+  padding: 12px 20px;
+  border: 1px solid var(--ieum-green);
+  border-radius: 3px;
+  background: var(--ieum-green);
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: none;
+}
+#kc-login:hover, .login-pf-page .pf-c-button.pf-m-primary:hover { background: #28564c; }
+.login-pf-page .pf-c-button.pf-m-primary::after { border: 0; }
+.login-pf-page a { color: #365e4f; }
+.login-pf-page a:focus-visible, .login-pf-page button:focus-visible,
+.login-pf-page input:focus-visible { outline: 3px solid #b09b57; outline-offset: 3px; }
+#kc-locale { position: relative; top: auto; right: auto; display: flex; justify-content: flex-end; margin: 0 0 18px; }
+#kc-locale-wrapper { position: relative; }
+#kc-current-locale-link { color: var(--ieum-muted); font-size: 11px; }
+#kc-locale ul { min-width: 110px; border-radius: 3px; }
+.login-pf-page .pf-c-alert { border-radius: 3px; font-size: 12px; }
+.login-pf-page .pf-c-alert.pf-m-danger, .login-pf-page .alert-error {
+  background: #fcf1ec;
+  border: 1px solid #edcfc3;
+  color: #923e2c;
+}
+#input-error, .login-pf-page .pf-m-error { color: #a24235; font-size: 12px; }
+#kc-info-wrapper { padding: 18px 0 0; background: transparent; color: var(--ieum-muted); font-size: 12px; }
+@media (max-width: 850px) {
+  .login-pf-page { gap: 40px; padding: 50px 28px 60px; }
+  #kc-header::after { font-size: 28px; }
+  .login-pf-page .card-pf { padding: 28px 26px; }
+}
+@media (max-width: 650px) {
+  .login-pf-page { grid-template-columns: minmax(0, 1fr); gap: 28px; max-width: 500px; padding: 30px 22px 45px; }
+  #kc-header { padding-bottom: 0; background: none; }
+  #kc-header-wrapper { font-size: 25px; }
+  #kc-header::before { margin-top: 27px; font-size: 9px; }
+  #kc-header::after { margin-top: 12px; font-size: 26px; }
+  .login-pf-page .card-pf { max-width: none; margin: 0; padding: 25px 23px; }
+  #kc-page-title { font-size: 24px; }
+  body::before { font-size: 10px; }
+}

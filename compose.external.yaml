@@ -1,6 +1,23 @@
 # Overlay only. First file must be ../privacygate/compose.yaml.
 # No changes are made to matchmaking-internal or privacygate repositories.
 services:
+  keycloak:
+    volumes:
+      - ../matchmaking-external/infra/keycloak/themes/ieum-members:/opt/keycloak/themes/ieum-members:ro
+  member-theme-setup:
+    profiles: [external]
+    image: quay.io/keycloak/keycloak:26.0.7
+    entrypoint: ["/bin/bash", "/opt/setup-member-theme.sh"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-infra_admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?}
+    volumes:
+      - ../matchmaking-external/scripts/setup-member-theme.sh:/opt/setup-member-theme.sh:ro
+    networks: [auth-internal-net]
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    restart: "no"
   external-api:
     build:
       context: ../matchmaking-external
@@ -11,10 +28,14 @@ services:
       SESSION_DB_PATH: /data/external-session/sessions.sqlite3
       SESSION_KEY_FILE: /run/secrets/external_session_key
       GATE_MODE: ${GATE_MODE:-enforce}
+      MEMBER_STATUS_CHECK: ${MEMBER_STATUS_CHECK:-false}
     volumes:
       - external-session-data:/data/external-session
     secrets:
       - external_session_key
+    depends_on:
+      member-theme-setup:
+        condition: service_completed_successfully
   transfer-api:
     build:
       context: ../matchmaking-external
@@ -24,9 +45,25 @@ services:
     environment:
       MATCHING_DIRECTORY_MODE: ${MATCHING_DIRECTORY_MODE:-internal}
       ENABLE_TEST_PAYMENTS: ${ENABLE_TEST_PAYMENTS:-false}
+      MEMBER_STATUS_CHECK: ${MEMBER_STATUS_CHECK:-false}
     depends_on:
       matching-migrate:
         condition: service_completed_successfully
+      meeting-migrate:
+        condition: service_completed_successfully
+  meeting-migrate:
+    profiles: [external]
+    image: postgres:16-alpine
+    environment:
+      PGPASSWORD: ${TRANSFER_DB_OWNER_PASSWORD:?}
+    command: ["psql", "-h", "transfer-db", "-U", "db_owner", "-d", "matchmaking_transfer", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", "/migrations/002_meetings.sql"]
+    volumes:
+      - ../matchmaking-external/infra/migrations:/migrations:ro
+    networks: [transfer-db-net]
+    depends_on:
+      matching-migrate:
+        condition: service_completed_successfully
+    restart: "no"
   matching-migrate:
     profiles: [external]
     image: postgres:16-alpine

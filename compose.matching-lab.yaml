@@ -1,10 +1,15 @@
 # Explicit opt-in synthetic matching and fake payment mode. No real card or money.
 # Add AFTER privacygate/compose.yaml and compose.external.yaml.
 services:
+  external-api:
+    environment:
+      MEMBER_STATUS_CHECK: "false"
   transfer-api:
     environment:
       MATCHING_DIRECTORY_MODE: synthetic
       ENABLE_TEST_PAYMENTS: "true"
+      # These synthetic Keycloak members are deliberately absent from business-db.
+      MEMBER_STATUS_CHECK: "false"
   keycloak:
     environment:
       KC_TEST_PASSWORD: ${KC_TEST_PASSWORD:?}

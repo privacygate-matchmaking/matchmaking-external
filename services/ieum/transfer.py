@@ -4,10 +4,11 @@ import os
 import re
 from datetime import timedelta
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 import httpx
-from fastapi import Body, Depends, File, Request, UploadFile
+from fastapi import Body, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
 from privacygate.transfer_rules import ApprovedDelivery, StoredFile, delivery_problem
 
@@ -26,6 +27,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
         'audit':os.getenv('AUDIT_LOG_PATH','/var/log/matchmaking/transfer-api.json'),'mode':os.getenv('GATE_MODE','enforce'),
         'matching_directory_mode':os.getenv('MATCHING_DIRECTORY_MODE','internal'),
         'test_payments':os.getenv('ENABLE_TEST_PAYMENTS','false').lower()=='true'}
+    config.setdefault('member_status_check',os.getenv('MEMBER_STATUS_CHECK','false').lower()=='true')
     if config['mode'] not in ('enforce','baseline'):
         raise RuntimeError('Invalid GATE_MODE')
     database=database or Database(config['database'])
@@ -73,6 +75,12 @@ def create_app(config=None, identity=None, database=None, internal=None):
         correlation=request.headers.get('X-Trace-Id','')
         if re.fullmatch(r'[0-9a-f]{32}',correlation):
             request.state.trace_id=correlation
+        if config['member_status_check'] and request.url.path not in (
+                '/api/internal/member-status','/api/internal/member-withdrawal/cancel'):
+            from .member_account import status_from_response
+            status=status_from_response(upstream('GET','/api/internal/my-status',request))
+            if status['status']!='active':
+                deny('ACCESS_DENIED','member_not_active',status.get('message') or '현재 회원 서비스를 이용할 수 없는 상태입니다.')
         return user
 
     setattr(member,'__privacygate_policy__','service:external-api')
@@ -95,7 +103,10 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 code='INTERNAL_ERROR'
             if code not in ('AUTH_REQUIRED','ACCESS_DENIED','CONSENT_INVALID','INVALID_STATE','NOT_FOUND','INVALID_REQUEST'):
                 code='INTERNAL_ERROR'
-            deny(code,'internal_request_failed')
+            try:message=result.json()['error'].get('message')
+            except (ValueError,KeyError,TypeError):message=None
+            if not isinstance(message,str) or len(message)>200 or '\n' in message or '\r' in message:message=None
+            deny(code,'internal_request_failed',message)
         return result
 
     def disclosure(row):
@@ -320,12 +331,14 @@ def create_app(config=None, identity=None, database=None, internal=None):
                         headers={'Content-Disposition':'attachment; filename="ieum-material"'})
 
     @app.post('/api/internal/evidence-submissions',status_code=201)
-    async def evidence_submit(request: Request,file: UploadFile=File(...),user=Depends(member)):
+    async def evidence_submit(request: Request,file: UploadFile=File(...),
+                              kind: Literal['education','employment']=Form('education'),user=Depends(member)):
         content=await file.read(MAX_FILE+1)
         await file.close()
         if not content or len(content)>MAX_FILE or not content.startswith(b'%PDF-'):
             deny('INVALID_REQUEST','invalid_evidence')
-        return upstream('POST','/api/evidence-files',request,files={'file':('evidence.pdf',content,'application/pdf')}).json()
+        return upstream('POST','/api/evidence-files',request,data={'kind':kind},
+                        files={'file':('evidence.pdf',content,'application/pdf')}).json()
 
     @app.get('/api/internal/evidence-submissions')
     def evidence_status(request: Request,user=Depends(member)):
@@ -347,6 +360,10 @@ def create_app(config=None, identity=None, database=None, internal=None):
 
     from .matching_routes import register_matching
     register_matching(app,config,database,member,upstream,audit)
+    from .meeting_routes import register_meetings
+    register_meetings(app,app.state.matching,member,role('counselor'),upstream,config,audit)
+    from .member_account import register_account_relay
+    register_account_relay(app,member,upstream,audit,lambda:config['member_status_check'])
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)
     app.state.database,app.state.staff,app.state.member=database,staff,member

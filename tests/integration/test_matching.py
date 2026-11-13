@@ -20,6 +20,9 @@ def schema(path):
     text=(Path(__file__).resolve().parents[2]/'infra/migrations/001_matching.sql').read_text(encoding='utf-8')
     text='\n'.join(line for line in text.splitlines() if not line.startswith('GRANT '))
     with sqlite3.connect(path) as db:db.executescript(text)
+    meetings=(Path(__file__).resolve().parents[2]/'infra/migrations/002_meetings.sql').read_text(encoding='utf-8')
+    meetings='\n'.join(line for line in meetings.splitlines() if not line.startswith('GRANT '))
+    with sqlite3.connect(path) as db:db.executescript(meetings)
 
 
 @pytest.fixture

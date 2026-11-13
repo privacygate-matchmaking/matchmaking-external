@@ -14,7 +14,7 @@ from ieum.identity import Identity
 @pytest.fixture
 def signing():
     key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
-    jwk=json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()));jwk['kid']='test-key'
+    jwk=json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()));jwk.update(kid='test-key',use='sig')
     def handle(req):
         if req.url.path=='/jwks':return httpx.Response(200,json={'keys':[jwk]})
         return httpx.Response(200,json={'issuer':'https://id.test','jwks_uri':'https://id.test/jwks',

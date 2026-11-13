@@ -1,0 +1,9 @@
+# Opt in only after the latest internal business schema and APIs are deployed.
+# Do not combine with compose.matching-lab.yaml (its members have no business row).
+services:
+  external-api:
+    environment:
+      MEMBER_STATUS_CHECK: "true"
+  transfer-api:
+    environment:
+      MEMBER_STATUS_CHECK: "true"

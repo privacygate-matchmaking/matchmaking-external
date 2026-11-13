@@ -1,0 +1,94 @@
+<!-- Read-only audit input. No active response. Alerts are evidence of observations,
+     not proof of successful exfiltration or successful API blocking. -->
+<group name="privacygate,ieum,">
+  <rule id="100100" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="service" type="pcre2">^(internal-api|transfer-api|external-api)$</field>
+    <description>IEUM application audit</description>
+  </rule>
+  <rule id="100101" level="3">
+    <if_sid>100100</if_sid>
+    <field name="result">^deny$</field>
+    <description>IEUM denied request: $(service) $(action) ($(reason))</description>
+    <group>ieum_audit,</group>
+  </rule>
+  <rule id="100102" level="3">
+    <if_sid>100100</if_sid>
+    <field name="result">^allow$</field>
+    <description>IEUM allowed operation: $(service) $(action)</description>
+    <group>ieum_normal,</group>
+  </rule>
+  <rule id="100103" level="5">
+    <if_sid>100100</if_sid>
+    <field name="result">^error$</field>
+    <description>IEUM service error: $(service) $(action) ($(reason))</description>
+    <group>ieum_operations,</group>
+  </rule>
+  <rule id="100110" level="7">
+    <if_sid>100101</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^POST /api/admin/member-exports$</action>
+    <field name="actor" type="pcre2">^(?!null$).+</field>
+    <description>IEUM unauthorized administrator export attempt: $(actor)</description>
+    <group>ieum_attack1,</group>
+  </rule>
+  <rule id="100112" level="10" frequency="3" timeframe="60">
+    <if_sid>100110</if_sid>
+    <if_matched_sid>100110</if_matched_sid>
+    <same_field>actor</same_field>
+    <different_field>trace_id</different_field>
+    <description>IEUM repeated administrator export denial: same actor, 3 distinct requests in 60s</description>
+    <group>ieum_attack1,ieum_repeated,</group>
+  </rule>
+  <rule id="100111" level="10">
+    <if_sid>100101</if_sid>
+    <field name="service">^transfer-api$</field>
+    <field name="reason" type="pcre2">^(requested_file_not_approved|recipient_mismatch)$</field>
+    <description>IEUM requested file or recipient does not match approval: $(actor)</description>
+    <group>ieum_attack2,</group>
+  </rule>
+  <rule id="100120" level="12">
+    <if_sid>100101</if_sid>
+    <field name="service">^transfer-api$</field>
+    <field name="reason" type="pcre2">^(actual_file_hash_mismatch|file_hash_mismatch|file_version_mismatch)$</field>
+    <description>IEUM export file integrity mismatch: $(reason)</description>
+    <group>ieum_integrity,</group>
+  </rule>
+  <rule id="100130" level="7">
+    <if_sid>100101</if_sid>
+    <field name="service">^transfer-api$</field>
+    <field name="reason" type="pcre2">^(recipient_only|sender_only)$</field>
+    <description>IEUM matching decision ownership violation: $(actor)</description>
+    <group>ieum_matching,</group>
+  </rule>
+  <rule id="100131" level="8">
+    <if_sid>100102</if_sid>
+    <field name="service">^transfer-api$</field>
+    <action type="pcre2">^delivery\.download$</action>
+    <field name="reason">^baseline_file_binding_omitted$</field>
+    <description>IEUM lab baseline: file binding check omitted; inspect actual response separately</description>
+    <group>ieum_baseline,</group>
+  </rule>
+  <rule id="100140" level="12">
+    <if_sid>100103</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^member_purge$</action>
+    <description>IEUM member data deletion failed; inspect retention task</description>
+    <group>ieum_lifecycle,</group>
+  </rule>
+  <rule id="100141" level="10">
+    <if_sid>100103</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^evidence_delete$</action>
+    <description>IEUM original evidence deletion failed</description>
+    <group>ieum_lifecycle,</group>
+  </rule>
+  <rule id="100142" level="12">
+    <if_sid>100103</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^member_account_delete$</action>
+    <field name="reason">^not_member_account$</field>
+    <description>IEUM account cleanup refused a non-member account target</description>
+    <group>ieum_lifecycle,</group>
+  </rule>
+</group>

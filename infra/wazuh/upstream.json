@@ -1,0 +1,11 @@
+{
+  "version": "4.14.10",
+  "base": "https://raw.githubusercontent.com/wazuh/wazuh-docker/v4.14.10/single-node/",
+  "sha256": {
+    "docker-compose.yml": "c320060156fb0c4d07156357bcd3f02b8aa638ac88c34b573adf332dfa9279ce",
+    "config/wazuh_cluster/wazuh_manager.conf": "b137a003c617aee4a980e9eb132ced34c746a7807089a67a107dbbae74518fce",
+    "config/wazuh_indexer/wazuh.indexer.yml": "8273837e2047a6a02a05c2ac3802c7d19e578a454e6250e0e1b5e2a8693bf295",
+    "config/wazuh_dashboard/opensearch_dashboards.yml": "3c25160c3e71d399cb1227b0de73f27bb8322f5b2740a89ea48e5fa4241ee8db",
+    "config/certs.yml": "01dfd585599e9b8d56c7cafd874eae7ff27ee538af250fc13d55afd1f80abd68"
+  }
+}

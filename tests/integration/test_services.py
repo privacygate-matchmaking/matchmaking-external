@@ -88,6 +88,12 @@ def env(tmp_path):
         if req.url.path=='/api/internal/disclosure-checks':
             return httpx.Response(200,json={'allowed':state['allowed'],'expires_at':state['consent_expires'],
               'member_pseudo_id':'M-001','recipient_pseudo_id':'M-B01'})
+        if req.url.path=='/api/internal/matching-staff-checks':
+            if state.get('staff_scope_unavailable'):return httpx.Response(501,json={})
+            state['staff_scope_body']=json.loads(req.content)
+            return httpx.Response(200,json={'allowed':state.get('staff_scope_allowed',False)
+                and req.headers.get('X-User-Token')=='COUNSELOR',
+                'assigned_user_ids':state.get('staff_scope_assigned',[B,C])})
         if state.get('matching') and req.url.path=='/api/internal/matching-directory':
             from ieum.matching import synthetic_directory
             subject={'MEMBER':B,'OTHER':C}.get(req.headers.get('X-User-Token'))
@@ -100,6 +106,19 @@ def env(tmp_path):
               {'scope':'contact','label':'연락처','value':'SYNTHETIC-CONTACT','review_status':'reviewed','reviewed_at':iso(now())}]})
         if req.headers.get('X-User-Token')!='MEMBER':
             return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
+        if req.url.path=='/api/internal/my-status':
+            if state.get('status_unavailable'):return httpx.Response(501,json={})
+            return httpx.Response(200,json=state.get('member_status',{'status':'active','message':None}))
+        if req.url.path=='/api/internal/my-withdrawal':
+            state['withdrawal_body']=json.loads(req.content)
+            state['member_status']={'status':'withdraw_pending','by':'self','can_cancel':True,
+                                    'message':'탈퇴 신청한 계정입니다.','withdraw_at':iso(now()+timedelta(days=7))}
+            return httpx.Response(200,json=state['member_status'])
+        if req.url.path=='/api/internal/my-withdrawal/cancel':
+            if state.get('member_status',{}).get('by')=='staff':
+                return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED','message':'직원 처리 탈퇴는 철회할 수 없습니다.'}})
+            state['member_status']={'status':'active','message':None}
+            return httpx.Response(200,json={'status':'active'})
         if req.url.path=='/api/internal/my-consents':
             if req.method=='POST':return httpx.Response(201,json={'consent_id':CONSENT,**json.loads(req.content)})
             return httpx.Response(200,json={'items':[],'counterparts':[{'counterpart_member_id':M,'counterpart_pseudo_id':'M-001'}]})

@@ -56,7 +56,7 @@ class Identity:
                         if isinstance(j, dict)
                         and isinstance(j.get('kid'), str) and j['kid']
                         and j.get('kty') == 'RSA'
-                        and j.get('use') in (None, 'sig')
+                        and j.get('use') == 'sig'
                         and j.get('alg') in (None, 'RS256')
                         and ('key_ops' not in j or 'verify' in j['key_ops'])
                     }

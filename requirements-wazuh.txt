@@ -1,0 +1,4 @@
+# Preparation tool only; not installed into the business API images.
+PyYAML>=6,<7
+bcrypt>=4,<6
+cryptography>=44,<51

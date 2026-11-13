@@ -5,11 +5,12 @@ import os
 import secrets
 import time
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, File, Request, UploadFile
+from fastapi import Depends, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from privacygate.errors import GateError
 from privacygate.session_rules import csrf_problem
@@ -29,6 +30,7 @@ def create_app(config=None, identity=None, upstream=None):
         'key':Path(os.getenv('SESSION_KEY_FILE','/run/secrets/external_session_key')).read_bytes().strip(),
         'audit':os.getenv('AUDIT_LOG_PATH','/var/log/matchmaking/external-api.json'),
         'mode':os.getenv('GATE_MODE','enforce'), 'secure':True,
+        'member_status_check':os.getenv('MEMBER_STATUS_CHECK','false').lower()=='true',
     }
     if config['mode'] not in ('enforce','baseline'):
         raise RuntimeError('Invalid GATE_MODE')
@@ -125,7 +127,8 @@ def create_app(config=None, identity=None, upstream=None):
 
     @app.get('/api/me')
     def me(request: Request, user=Depends(current)):
-        return {**user,'csrf_token':request.state.session['csrf_token'],'gate_mode':config['mode']}
+        return {**user,'csrf_token':request.state.session['csrf_token'],'gate_mode':config['mode'],
+                'member_status_check':config.get('member_status_check',False),'meeting_scheduling':True}
 
     @app.post('/auth/logout')
     def logout(request: Request, user=Depends(current)):
@@ -181,12 +184,14 @@ def create_app(config=None, identity=None, upstream=None):
         return relay(request,'GET','/api/internal/evidence-submissions').json()
 
     @app.post('/api/me/evidence-files',status_code=201)
-    async def evidence(request: Request, file: UploadFile=File(...), user=Depends(current)):
+    async def evidence(request: Request, file: UploadFile=File(...),
+                       kind: Literal['education','employment']=Form('education'), user=Depends(current)):
         body=await file.read(MAX_FILE+1)
         await file.close()
         if not body or len(body)>MAX_FILE or not body.startswith(b'%PDF-'):
             deny('INVALID_REQUEST','invalid_evidence')
-        result=relay(request,'POST','/api/internal/evidence-submissions',files={'file':('evidence.pdf',body,'application/pdf')})
+        result=relay(request,'POST','/api/internal/evidence-submissions',
+                     data={'kind':kind},files={'file':('evidence.pdf',body,'application/pdf')})
         audit.record(request,'evidence.submit')
         return result.json()
 
@@ -214,6 +219,8 @@ def create_app(config=None, identity=None, upstream=None):
 
     from .matching_bff import register_matching_bff
     register_matching_bff(app,current,relay,audit)
+    from .member_account import register_account_bff
+    register_account_bff(app,current,relay,audit)
     setattr(current,'__privacygate_policy__','roles:member')
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)

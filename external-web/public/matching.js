@@ -74,6 +74,7 @@ window.MatchingUI = (() => {
       }
       const detail=el('div','matching-detail');detail.hidden=true;
       if(item.status==='matched'){
+        if(ctx.meetingScheduling)actions.append(button('만남 일정 확인',async()=>{await MeetingsUI.render(item,detail,ctx);}));
         actions.append(button('내 공개 범위 설정',async()=>{await sharing(item,detail,ctx);}));
         actions.append(button('상대가 허용한 정보 보기',async()=>{await peer(item,detail,ctx);}));
         action('관계 종료','end');
