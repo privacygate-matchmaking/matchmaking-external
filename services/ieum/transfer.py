@@ -15,8 +15,31 @@ from privacygate.transfer_rules import ApprovedDelivery, StoredFile, delivery_pr
 from .core import MAX_FILE, Audit, Database, application, deny, iso, now, plain, required, stamp, uid
 from .identity import Identity, bearer, principal
 from .models import Consent, Empty, Release
+from .matching_release import PURPOSE as MATCHING_PURPOSE, check_release, grant_context, register_releases
+from privacygate.errors import GateError
 
-PROFILE_FIELDS={'member_pseudo_id','age_band','job_group','introduction'}
+PROFILE_FIELDS={'schema_version','member_id','display_name','age_band','job_group','introduction'}
+
+
+def profile_v2(body):
+    if not isinstance(body,dict) or set(body)!=PROFILE_FIELDS:
+        return False
+    if type(body['schema_version']) is not int or body['schema_version']!=2:
+        return False
+    if not all(isinstance(body[k],str) and 1<=len(body[k])<=300 for k in PROFILE_FIELDS-{'schema_version'}):
+        return False
+    try:UUID(body['member_id'])
+    except (ValueError,TypeError):return False
+    return True
+
+
+def check_profile_subject(content,member_id):
+    try:body=json.loads(content)
+    except (ValueError,UnicodeError):deny('INVALID_STATE','profile_v2_required')
+    if not profile_v2(body):deny('INVALID_STATE','profile_v2_required','소개 자료를 새 형식으로 다시 생성하고 승인해주세요.')
+    if UUID(body['member_id'])!=UUID(str(member_id)):
+        deny('CONSENT_INVALID','profile_subject_mismatch')
+    return body
 
 
 def create_app(config=None, identity=None, database=None, internal=None):
@@ -112,12 +135,16 @@ def create_app(config=None, identity=None, database=None, internal=None):
     def disclosure(row):
         fields={k:str(row[k]) for k in ('member_id','recipient_id','consent_id','purpose')}
         result=upstream('POST','/api/internal/disclosure-checks',json={**fields,'item':'profile'}).json()
+        if not isinstance(result,dict):deny('INTERNAL_ERROR','invalid_disclosure_response')
         if type(result.get('allowed')) is not bool:
             deny('INTERNAL_ERROR','invalid_disclosure_response')
         if not result['allowed']:
             deny('CONSENT_INVALID','consent_invalid')
         if not result.get('expires_at') or stamp(result['expires_at'])<=now():
             deny('CONSENT_INVALID','consent_expired')
+        try:subject=UUID(result['member_id'])
+        except (KeyError,ValueError,TypeError,AttributeError):deny('INTERNAL_ERROR','disclosure_member_id_required')
+        if subject!=UUID(str(row['member_id'])):deny('CONSENT_INVALID','disclosure_subject_mismatch')
         return result
 
     def fetch_file(db,file_id):
@@ -143,6 +170,15 @@ def create_app(config=None, identity=None, database=None, internal=None):
             deny('APPROVAL_MISMATCH','actual_file_hash_mismatch')
         return content
 
+    def release_check(db,row,file):
+        content=bytes_for(file)
+        if row['purpose']==MATCHING_PURPOSE:
+            if not database.test:db.execute('SELECT pg_advisory_xact_lock(87341052)')
+            return check_release(db,row,content,upstream)
+        consent=disclosure(row)
+        check_profile_subject(content,row['member_id'])
+        return consent
+
     @app.post('/api/transfer-files',status_code=201)
     async def register(request: Request,file: UploadFile=File(...),user=Depends(role('counselor'))):
         require_role(user,('counselor',))
@@ -153,7 +189,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
         status,reason,banned='blocked','unsupported_format',True
         try:
             body=json.loads(content.decode('utf-8'))
-            if isinstance(body,dict) and set(body)==PROFILE_FIELDS and all(isinstance(x,str) and 1<=len(x)<=300 for x in body.values()):
+            if profile_v2(body):
                 status,reason,banned='passed','profile_schema_passed',False
         except (ValueError,UnicodeError):
             pass
@@ -189,9 +225,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 deny('NOT_FOUND','not_own_file')
             if file['scan_status']!='passed' or file['export_banned']:
                 deny('INVALID_STATE','file_not_eligible')
-            preview=json.loads(bytes_for(file))
-            if not consent.get('member_pseudo_id') or preview['member_pseudo_id']!=consent['member_pseudo_id']:
-                deny('CONSENT_INVALID','profile_subject_mismatch')
+            check_profile_subject(bytes_for(file),body.member_id)
             request_id=uid()
             db.execute('INSERT INTO export_requests (request_id,requester_id,file_id,file_version,file_hash,recipient_id,member_id,consent_id,purpose,request_status,expires_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                 (request_id,user['user_id'],str(body.file_id),file['file_version'],file['file_hash'],str(body.recipient_id),str(body.member_id),str(body.consent_id),body.purpose,'pending',expires,now()))
@@ -232,13 +266,13 @@ def create_app(config=None, identity=None, database=None, internal=None):
             if item['request_status']!='pending' or stamp(item['expires_at'])<=now():
                 deny('INVALID_STATE','request_not_pending')
             if approve:
-                consent=disclosure(item)
+                file=fetch_file(db,item['file_id'])
+                consent=release_check(db,item,file)
                 if stamp(item['expires_at'])>stamp(consent['expires_at']):
                     deny('CONSENT_INVALID','consent_expiry_changed')
                 file=fetch_file(db,item['file_id'])
                 if file['scan_status']!='passed' or file['export_banned'] or file['file_version']!=item['file_version'] or file['file_hash']!=item['file_hash']:
                     deny('APPROVAL_MISMATCH','file_changed_before_approval')
-                bytes_for(file)
                 approval_id,delivery_id=uid(),uid()
                 db.execute('INSERT INTO approvals (approval_id,request_id,requester_id,approver_id,approved_file_id,approved_file_version,approved_file_hash,expires_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                     (approval_id,str(request_id),item['requester_id'],user['user_id'],item['file_id'],item['file_version'],item['file_hash'],stamp(item['expires_at']),now()))
@@ -288,6 +322,9 @@ def create_app(config=None, identity=None, database=None, internal=None):
                     status='revoked'
                 elif min(stamp(row['expires_at']),stamp(row['approval_expires_at']))<=now():
                     status='expired'
+                if status=='approved' and row['purpose']==MATCHING_PURPOSE:
+                    try:grant_context(db,row['consent_id'])
+                    except GateError:status='consent_required'
                 result.append({'delivery_id':row['delivery_id'],'approval_id':row['approval_id'],'file_id':row['approved_file_id'],
                     'file_version':row['approved_file_version'],'purpose':row['purpose'],'request_status':status,
                     'expires_at':iso(min(stamp(row['expires_at']),stamp(row['approval_expires_at']))),
@@ -308,8 +345,8 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 request.state.audit_references.append(('requested_file',str(file_id)))
             if row['revoked_at']:
                 deny('ACCESS_DENIED','approval_revoked')
-            consent=disclosure(row)
             approved=fetch_file(db,row['approved_file_id'])
+            consent=release_check(db,row,approved)
             if approved['export_banned']:
                 deny('ACCESS_DENIED','approved_file_banned')
             record=ApprovedDelivery(str(delivery_id),row['recipient_id'],row['request_status'],
@@ -362,6 +399,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
     register_matching(app,config,database,member,upstream,audit)
     from .meeting_routes import register_meetings
     register_meetings(app,app.state.matching,member,role('counselor'),upstream,config,audit)
+    register_releases(app,app.state.matching,database,role('counselor'),upstream,verified,audit)
     from .member_account import register_account_relay
     register_account_relay(app,member,upstream,audit,lambda:config['member_status_check'])
     from privacygate.web import assert_all_routes_guarded

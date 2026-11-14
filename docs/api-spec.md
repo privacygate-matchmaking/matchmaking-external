@@ -1,6 +1,6 @@
 # 외부·중계 API
 
-2026-11-13 기준. 로그인·증빙·동의·반출 경로를 정리합니다. [매칭 API](matching-api.md), [일정 API](meeting-scheduling.md), [회원 상태·탈퇴 경로](internal-handoff.md)를 함께 확인합니다.
+2026-11-14 기준. 로그인·증빙·동의·반출 경로를 정리합니다. [매칭 API](matching-api.md), [일정 API](meeting-scheduling.md), [회원 상태·탈퇴 경로](internal-handoff.md)를 함께 확인합니다.
 
 모든 ID는 UUID, 시각은 시간대 포함 ISO 8601입니다. JSON 모델의 미정의 필드는 422입니다. 오류는 {"error":{"code":"APPROVAL_MISMATCH","message":"…","trace_id":"…"}} 형태입니다. 401 인증, 403 정책 거부, 404 대상 없음, 409 상태 충돌, 422 입력 오류, 500 의존 서비스/내부 오류를 사용합니다.
 
@@ -42,7 +42,7 @@ Authorization: Bearer 직원 access token. aud=transfer-api, azp=internal-web. �
 
 반출 신청 모델: file_id, member_id(정보 주체), recipient_id(외부 수신자 user UUID), consent_id, purpose=introduction, expires_at. 유효 동의 및 파일 적합성·주체 일치가 필요합니다. 만료는 현재 이후 7일 이내이며 동의 만료를 넘을 수 없습니다.
 
-소개 JSON 파일의 정확한 키: member_pseudo_id, age_band, job_group, introduction. 값은 1~300자 문자열입니다. 이는 형식 검사이며 악성코드 검사나 모든 개인정보 식별을 보장하지 않습니다. CSV 등은 blocked/export_banned=true로 사설 대기영역에 등록되지만 승인할 수 없습니다.
+소개 JSON v2의 정확한 키: schema_version(정수 2), member_id(업무 회원 UUID 문자열), display_name, age_band, job_group, introduction. 나머지 다섯 값은 1~300자 문자열입니다. 파일/신청/동의 응답의 member_id를 비교하며 실명은 판단에 사용하지 않습니다. 기존 형식은 재생성·재승인이 필요합니다. 이는 형식 검사이며 악성코드 검사나 모든 개인정보 식별을 보장하지 않습니다. CSV 등은 blocked/export_banned=true로 사설 대기영역에 등록되지만 승인할 수 없습니다.
 
 ## external-api → transfer-api
 
@@ -61,3 +61,14 @@ Authorization: Bearer external-api 서비스 토큰 및 X-User-Token: 회원 acc
 다운로드 URL의 delivery_id가 정상 승인 문맥을 식별합니다. 별도의 approval_id 입력은 받지 않습니다. baseline은 그 문맥의 유효성 검사 후 요청 file_id만 잘못 신뢰합니다. enforce는 file_id 불일치를 403으로 거부합니다. 정상 file_id 생략 요청은 두 모드에서 승인 파일을 반환합니다.
 
 GET /health는 로그인 없이 프로세스 생존 상태만 반환하며 의존 서비스 준비 완료를 뜻하지 않습니다.
+
+
+## 명시적 매칭 동의 기반 자료 제공
+
+- 직원 GET `/api/matching/overview`: 내부 상담 BFF에서 중계 조회. 매칭 ID·양쪽 user UUID·상태·최근 방향별 동의와 새 반출 상태를 반환. 내부 BFF는 담당 회원 코드/이름, 비담당 상대의 최소 설명으로 표시.
+- 내부 BFF GET `/api/matching/overview?member_id=<업무 UUID>`: 현재 담당 범위를 확인한 뒤 해당 회원의 항목만 반환.
+- 직원 POST `/api/matching/releases`: `{ "grant_id": "UUID", "scopes": ["education"] }`. 201: request_id, file_id, consent_id, request_status=pending. 내부 BFF는 CSRF와 Origin 필수. profile/education/employment 중 동의된 항목만 선택 가능.
+- 서비스 POST `/api/internal/matching-release-checks`: owner_id, recipient_id, member_id, requester_id, scopes. transfer-api 서비스 인증 전용. 실제 현재 검토 결과를 반환하며 미심사·반려 항목은 409, 주체/담당/활성/소개 관계 위반은 403.
+- 새 자료 형식 3: schema_version=3, member_id, recipient_id, grant_id, match_id, purpose=introduction, scopes, fields(각 scope/label/value/review_status/reviewed_at). 원본·연락처·실명은 포함하지 않음.
+- 새 export_requests의 purpose=matching_introduction은 중계 서버가 지정. consent_id는 실제 matching_grants.grant_id 참조. 기존 소개 purpose=introduction/형식2 경로와 구별하며 기존 기록은 변경하지 않음.
+- 승인·다운로드는 현재 회원 동의·매칭·기간·검토·담당과 파일 고정값을 재확인. 새 형식 파일은 일반 업로드로 등록 불가. 기존 API를 통한 임의 목적 변경 불가.

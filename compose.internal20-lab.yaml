@@ -1,0 +1,12 @@
+# Explicit synthetic internal 20-member lab; no real payment processing.
+# Do NOT combine with compose.matching-lab.yaml (a different member dataset).
+# Account setup is a separate host-side operation, not a recurring container job.
+services:
+  external-api:
+    environment:
+      MEMBER_STATUS_CHECK: "true"
+  transfer-api:
+    environment:
+      MATCHING_DIRECTORY_MODE: internal
+      ENABLE_TEST_PAYMENTS: "true"
+      MEMBER_STATUS_CHECK: "true"

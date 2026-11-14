@@ -23,7 +23,7 @@ A='11111111-1111-4111-8111-111111111101'
 P='11111111-1111-4111-8111-111111111103'
 M='bbbbbbbb-0000-4000-8000-000000000001'
 CONSENT='44444444-4444-4444-8444-444444444401'
-PROFILE={'member_pseudo_id':'M-001','age_band':'30대','job_group':'연구','introduction':'합성 소개 자료'}
+PROFILE={'schema_version':2,'member_id':M,'display_name':'가상 회원','age_band':'30대','job_group':'연구','introduction':'합성 소개 자료'}
 
 
 class FakeIdentity:
@@ -85,9 +85,18 @@ def env(tmp_path):
         state['requests'].append(req)
         if req.headers.get('Authorization')!='Bearer SVC_TRANSFER':
             return httpx.Response(401,json={'error':{'code':'AUTH_REQUIRED'}})
+        if req.url.path=='/api/internal/matching-release-checks':
+            body=json.loads(req.content)
+            if not state.get('release_assigned',False):
+                return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
+            if state.get('release_review_fail'):
+                return httpx.Response(409,json={'error':{'code':'INVALID_STATE'}})
+            return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
+                {'scope':s,'label':s,'value':state.get('release_value','REVIEWED-TEXT'),
+                 'review_status':'reviewed','reviewed_at':'2026-01-01T00:00:00Z'} for s in body['scopes']]})
         if req.url.path=='/api/internal/disclosure-checks':
             return httpx.Response(200,json={'allowed':state['allowed'],'expires_at':state['consent_expires'],
-              'member_pseudo_id':'M-001','recipient_pseudo_id':'M-B01'})
+              'member_id':state.get('disclosure_member_id',M)})
         if req.url.path=='/api/internal/matching-staff-checks':
             if state.get('staff_scope_unavailable'):return httpx.Response(501,json={})
             state['staff_scope_body']=json.loads(req.content)
@@ -369,3 +378,48 @@ def test_reject_and_revoke_workflow(env):
     assert env['t'].post(f'/api/approvals/{d["approval_id"]}/revoke',json={},headers=headers('APPROVER')).status_code==200
     login(env)
     assert env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download').status_code==403
+
+
+@pytest.mark.parametrize('stage',['request','approve','download'])
+def test_disclosure_uuid_mismatch_is_rejected_at_each_stage(env,stage):
+    if stage=='request':
+        f=upload(env)
+        env['state']['disclosure_member_id']=str(uuid4())
+        result=env['t'].post('/api/export-requests',headers=headers(),json={
+            'file_id':f['file_id'],'member_id':M,'recipient_id':B,'consent_id':CONSENT,
+            'purpose':'introduction','expires_at':iso(now()+timedelta(days=1))})
+    elif stage=='approve':
+        r,_=request(env);env['state']['disclosure_member_id']=str(uuid4())
+        result=env['t'].post(f'/api/export-requests/{r["request_id"]}/approve',headers=headers('APPROVER'),json={})
+    else:
+        d,_=approved(env);env['state']['disclosure_member_id']=str(uuid4())
+        result=env['t'].get(f'/api/internal/deliveries/{d["delivery_id"]}/download',headers={**headers('SVC_EXTERNAL'),'X-User-Token':'MEMBER'})
+    assert result.status_code==403 and '합성 소개 자료' not in result.text
+
+
+def test_display_name_is_not_subject_identity(env):
+    profile={**PROFILE,'display_name':'다른 표시 이름'}
+    f=upload(env,json.dumps(profile,ensure_ascii=False).encode())
+    r=env['t'].post('/api/export-requests',headers=headers(),json={
+        'file_id':f['file_id'],'member_id':M,'recipient_id':B,'consent_id':CONSENT,
+        'purpose':'introduction','expires_at':iso(now()+timedelta(days=1))})
+    assert r.status_code==201
+
+
+def test_same_name_with_wrong_uuid_cannot_be_released(env):
+    f=upload(env,json.dumps({**PROFILE,'member_id':str(uuid4())}).encode())
+    r=env['t'].post('/api/export-requests',headers=headers(),json={
+        'file_id':f['file_id'],'member_id':M,'recipient_id':B,'consent_id':CONSENT,
+        'purpose':'introduction','expires_at':iso(now()+timedelta(days=1))})
+    assert r.status_code==403
+
+
+@pytest.mark.parametrize('bad',[{'schema_version':True},{'member_id':'not-a-uuid'},{'extra':'bad'}])
+def test_profile_v2_rejects_malformed_files(env,bad):
+    f=upload(env,json.dumps({**PROFILE,**bad}).encode())
+    assert f['scan_status']=='blocked' and f['export_banned']
+
+
+def test_legacy_name_only_file_is_not_automatically_trusted(env):
+    f=upload(env,json.dumps({'member_pseudo_id':'M-001','age_band':'30대','job_group':'연구','introduction':'가상 자료'}).encode())
+    assert f['scan_status']=='blocked' and f['export_banned']

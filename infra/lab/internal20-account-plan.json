@@ -1,0 +1,142 @@
+[
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000001",
+    "user_id": "22222222-2222-4222-8222-222222222202",
+    "member_code": "A-001",
+    "username": "member_001",
+    "legacy_username": "member_c"
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000002",
+    "user_id": "22222222-2222-4222-8222-222222222203",
+    "member_code": "A-002",
+    "username": "member_002",
+    "legacy_username": "member_d"
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000003",
+    "user_id": "22222222-2222-4222-8222-222222222201",
+    "member_code": "A-003",
+    "username": "member_003",
+    "legacy_username": "member_b"
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000004",
+    "user_id": "22222222-2222-4222-8222-222222222204",
+    "member_code": "A-004",
+    "username": "member_004",
+    "legacy_username": "member_e"
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000005",
+    "user_id": "22222222-2222-4222-8222-222222222205",
+    "member_code": "A-005",
+    "username": "member_005",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000006",
+    "user_id": "22222222-2222-4222-8222-222222222206",
+    "member_code": "A-006",
+    "username": "member_006",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000007",
+    "user_id": "22222222-2222-4222-8222-222222222207",
+    "member_code": "A-007",
+    "username": "member_007",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000008",
+    "user_id": "22222222-2222-4222-8222-222222222208",
+    "member_code": "A-008",
+    "username": "member_008",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000009",
+    "user_id": "22222222-2222-4222-8222-222222222209",
+    "member_code": "A-009",
+    "username": "member_009",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000010",
+    "user_id": "22222222-2222-4222-8222-222222222210",
+    "member_code": "A-010",
+    "username": "member_010",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000011",
+    "user_id": "22222222-2222-4222-8222-222222222211",
+    "member_code": "A-011",
+    "username": "member_011",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000012",
+    "user_id": "22222222-2222-4222-8222-222222222212",
+    "member_code": "A-012",
+    "username": "member_012",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000013",
+    "user_id": "22222222-2222-4222-8222-222222222213",
+    "member_code": "A-013",
+    "username": "member_013",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000014",
+    "user_id": "22222222-2222-4222-8222-222222222214",
+    "member_code": "A-014",
+    "username": "member_014",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000015",
+    "user_id": "22222222-2222-4222-8222-222222222215",
+    "member_code": "A-015",
+    "username": "member_015",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000016",
+    "user_id": "22222222-2222-4222-8222-222222222216",
+    "member_code": "A-016",
+    "username": "member_016",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000017",
+    "user_id": "22222222-2222-4222-8222-222222222217",
+    "member_code": "A-017",
+    "username": "member_017",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000018",
+    "user_id": "22222222-2222-4222-8222-222222222218",
+    "member_code": "A-018",
+    "username": "member_018",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000019",
+    "user_id": "22222222-2222-4222-8222-222222222219",
+    "member_code": "A-019",
+    "username": "member_019",
+    "legacy_username": null
+  },
+  {
+    "member_id": "bbbbbbbb-0000-4000-8000-000000000020",
+    "user_id": "22222222-2222-4222-8222-222222222220",
+    "member_code": "A-020",
+    "username": "member_020",
+    "legacy_username": null
+  }
+]

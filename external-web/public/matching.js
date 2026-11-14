@@ -87,9 +87,9 @@ window.MatchingUI = (() => {
     try {
       const data=await(await ctx.api(`/api/me/matches/${item.match_id}/sharing`)).json();
       if(!panel.isConnected)return;
-      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 이 동의는 상대가 나의 정보를 보는 범위에만 적용됩니다. 사진·연락처·마스킹 사본은 내부 제공 API 연결 후 사용할 수 있습니다.'));
+      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 이 동의는 상대가 나의 정보를 보는 범위에만 적용됩니다. 현재 공개 가능한 항목은 소개·학력·재직의 검토 결과입니다. 사진·연락처·원본 증빙은 제공하지 않습니다. 직원이 선택한 동의 항목으로 자료를 만들고 별도 승인을 요청할 수 있습니다.'));
       const form=el('form','sharing-form');const checks=[];
-      for(const [code,name] of Object.entries(scopeNames)){
+      for(const [code,name] of Object.entries(scopeNames).filter(([code])=>['profile','education','employment'].includes(code))){
         const label=el('label','check-label');const input=el('input');input.type='checkbox';input.value=code;
         input.checked=!!(data.own_grant?.active&&data.own_grant.scopes.includes(code));
         label.append(input,el('span','',name));checks.push(input);form.append(label);
