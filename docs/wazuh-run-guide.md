@@ -87,6 +87,7 @@ docker exec ieum-wazuh-wazuh.manager-1 /var/ossec/bin/wazuh-control status
 | `rule.id:100130` | 매칭 수락·취소 등의 소유자 권한 위반 |
 | `rule.id:100102` | 정상 허용 기록 |
 | `rule.id:100131` | 시험 baseline의 파일 연결 검사 생략 기록 |
+| `rule.id:100132` | 시험 baseline에서 역할 검사 없이 허용된 관리자 내보내기 |
 | `rule.id:100140` | 내부 회원 정보 삭제 실패 |
 | `rule.id:100141` | 내부 증빙 원본 삭제 실패 |
 | `rule.id:100142` | 계정 정리 중 비회원 계정 삭제 거부 |

@@ -69,6 +69,14 @@
     <description>IEUM lab baseline: file binding check omitted; inspect actual response separately</description>
     <group>ieum_baseline,</group>
   </rule>
+  <rule id="100132" level="8">
+    <if_sid>100102</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^POST /api/admin/member-exports$</action>
+    <field name="reason">^baseline_role_check_off$</field>
+    <description>IEUM lab baseline: administrator export allowed without role check: $(actor)</description>
+    <group>ieum_baseline,ieum_attack1,</group>
+  </rule>
   <rule id="100140" level="12">
     <if_sid>100103</if_sid>
     <field name="service">^internal-api$</field>
