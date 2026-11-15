@@ -11,13 +11,30 @@ from .identity import bearer
 from privacygate.errors import GateError
 
 PURPOSE='matching_introduction'
-SUPPORTED={'profile','education','employment'}
+# 반출 자료로 보낼 수 있는 항목: 검토 결과 텍스트 + 검토된 사진·마스킹 문서 사본·연락처(조건부)
+# Every scope reaches the other member only through a counselor request + approver approval.
+# Contact additionally needs mutual contact consent and a confirmed meeting (contact_ready).
+SUPPORTED={'name','profile','education','employment','income','marital_status','property','photo','documents','contact'}
+ReleaseScope=Literal['name','profile','education','employment','income','marital_status','property','photo','documents','contact']
 
 
 class Preparation(BaseModel):
     model_config=ConfigDict(extra='forbid')
     grant_id: UUID
-    scopes: list[Literal['profile','education','employment']]=Field(min_length=1,max_length=3)
+    scopes: list[ReleaseScope]=Field(min_length=1,max_length=10)
+
+
+def contact_ready(db,grant,strict=True):
+    """연락처 전달 조건: 상대도 연락처 제공에 동의(유효) + 만남 일정 확정. 요청·승인·다운로드마다 다시 확인한다."""
+    reverse=db.execute('SELECT * FROM matching_grants WHERE match_id=%s AND owner_id=%s AND recipient_id=%s AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1',
+                       (grant['match_id'],grant['recipient_id'],grant['owner_id'])).fetchone()
+    mutual=bool(reverse) and stamp(plain(reverse)['expires_at'])>now() and 'contact' in json.loads(plain(reverse)['scopes_json'])
+    meeting=bool(db.execute("SELECT 1 FROM matching_meeting_proposals WHERE match_id=%s AND status='confirmed'",(grant['match_id'],)).fetchone())
+    if strict and not mutual:
+        deny('CONSENT_INVALID','contact_mutual_consent_required','연락처는 두 회원이 모두 연락처 제공에 동의해야 전달할 수 있습니다.')
+    if strict and not meeting:
+        deny('CONSENT_INVALID','contact_meeting_required','만남 일정이 확정된 뒤에 연락처를 전달할 수 있습니다.')
+    return mutual and meeting
 
 
 def grant_context(db,grant_id):
@@ -47,7 +64,7 @@ def reviewed(upstream,grant,scopes,requester_id):
     except ValueError:deny('INTERNAL_ERROR','invalid_matching_release_fields')
     if str(result.member_id)!=grant['member_id'] or {f.scope for f in result.fields}!=set(scopes) or len(result.fields)!=len(scopes):
         deny('CONSENT_INVALID','matching_release_fields_mismatch')
-    return [f.model_dump(mode='json') for f in result.fields]
+    return [f.model_dump(mode='json',exclude_none=True) for f in result.fields]
 
 
 def check_release(db,row,content,upstream):
@@ -61,6 +78,7 @@ def check_release(db,row,content,upstream):
     if not isinstance(scopes,list) or not scopes or not all(isinstance(s,str) for s in scopes) or len(set(scopes))!=len(scopes) or not set(scopes)<=SUPPORTED:
         deny('CONSENT_INVALID','matching_release_scope_invalid')
     if not set(scopes)<=set(grant['scopes']):deny('CONSENT_INVALID','matching_release_scope_not_granted')
+    if 'contact' in scopes:contact_ready(db,grant)
     expected={k:grant[k] for k in ('member_id','recipient_id','grant_id','match_id')}
     if any(doc[k]!=v for k,v in expected.items()) or doc['purpose']!='introduction' or any(
             str(row[k])!=grant[k] for k in ('member_id','recipient_id')):
@@ -69,6 +87,19 @@ def check_release(db,row,content,upstream):
     fields=reviewed(upstream,grant,scopes,row['requester_id'])
     if fields!=doc['fields']:deny('CONSENT_INVALID','matching_release_review_changed')
     return {'allowed':True,'member_id':grant['member_id'],'expires_at':grant['expires_at']}
+
+
+def meeting_state(db,pair,t):
+    """Staff list summary: confirmed, awaiting_approval (both members agreed), proposed or none."""
+    rows=db.execute("SELECT proposal_id,status,starts_at FROM matching_meeting_proposals WHERE match_id=%s AND status IN ('proposed','confirmed')",
+                    (pair['match_id'],)).fetchall()
+    rows=[plain(r) for r in rows if plain(r)['status']=='confirmed' or stamp(plain(r)['starts_at'])>t]
+    if any(r['status']=='confirmed' for r in rows):return 'confirmed'
+    for r in rows:
+        agreed={x['user_id'] for x in db.execute("SELECT user_id FROM matching_meeting_replies WHERE proposal_id=%s AND availability='available'",
+                                                 (r['proposal_id'],)).fetchall()}
+        if {pair['sender_id'],pair['recipient_id']}<={str(u) for u in agreed}:return 'awaiting_approval'
+    return 'proposed' if rows else 'none'
 
 
 def register_releases(app,matching,database,counselor,upstream,verified,audit):
@@ -105,12 +136,16 @@ def register_releases(app,matching,database,counselor,upstream,verified,audit):
                     active=pair['status']=='matched' and not g['revoked_at'] and stamp(g['expires_at'])>t
                     scopes=json.loads(g['scopes_json'])
                     grants.append({k:g[k] for k in ('grant_id','owner_id','recipient_id','expires_at','revoked_at')})
+                    supported=set(scopes)&SUPPORTED
+                    ready=active and 'contact' in supported and contact_ready(db,g,strict=False)
+                    if 'contact' in supported and not ready:supported.discard('contact')
                     grants[-1].update(scopes=scopes,active=active,can_prepare=active and owner in assigned,
-                                      supported_scopes=sorted(set(scopes)&SUPPORTED))
+                                      supported_scopes=sorted(supported),contact_ready=ready)
                 item['grants']=grants
                 rows=db.execute('SELECT request_id,consent_id,request_status,expires_at FROM export_requests WHERE purpose=%s AND consent_id IN (SELECT grant_id FROM matching_grants WHERE match_id=%s) ORDER BY created_at DESC',
                                 (PURPOSE,pair['match_id'])).fetchall()
                 item['releases']=[plain(r) for r in rows]
+                item['meeting_state']=meeting_state(db,pair,t)
                 items.append(item)
         return {'items':items,'data_source':'internal'}
 
@@ -122,6 +157,7 @@ def register_releases(app,matching,database,counselor,upstream,verified,audit):
                 grant=grant_context(db,body.grant_id)
                 scopes=sorted(set(body.scopes))
                 if not set(scopes)<=set(grant['scopes']):deny('CONSENT_INVALID','matching_release_scope_not_granted')
+                if 'contact' in scopes:contact_ready(db,grant)
                 fields=reviewed(upstream,grant,scopes,user['user_id'])
                 doc={k:grant[k] for k in ('member_id','recipient_id','grant_id','match_id')}
                 doc.update(schema_version=3,purpose='introduction',scopes=scopes,fields=fields)

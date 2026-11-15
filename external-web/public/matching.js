@@ -1,6 +1,12 @@
 'use strict';
 window.MatchingUI = (() => {
-  const scopeNames = {profile:'소개 정보',photo:'프로필 사진',contact:'연락처',education:'학력 검토 결과',employment:'재직 검토 결과',income:'소득 구간',marital_status:'혼인상태 검토 결과'};
+  const scopeNames = {name:'이름',profile:'소개 정보',education:'학력 검토 결과',employment:'재직 검토 결과',income:'소득 구간',marital_status:'혼인관계 검토 결과',property:'부동산 보유 검토 결과',photo:'프로필 사진',documents:'검토·마스킹된 문서 사본',contact:'연락처'};
+  const scopeHints = {name:'승인되면 상대 화면의 소개 정보에서 "소개 상대" 대신 실명이 보입니다.',
+    photo:'직원이 검토한 사진(위치 등 정보 제거)입니다.',
+    documents:'서류 심사를 통과한 학력·재직·소득·혼인·부동산 서류의 개인정보 가림 사본입니다. 원본은 제공하지 않습니다.',
+    contact:'만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의한 뒤에만 승인 요청할 수 있습니다.'};
+  const releaseOnly = [];
+  const conditional = {contact:' · 일정 확정 후'};
   const states = {pending:'응답 대기',matched:'매칭 성립',rejected:'거절',cancelled:'신청 취소',expired:'응답 기간 만료',ended:'관계 종료'};
   const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
   const date = x => x ? new Date(x).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
@@ -87,12 +93,13 @@ window.MatchingUI = (() => {
     try {
       const data=await(await ctx.api(`/api/me/matches/${item.match_id}/sharing`)).json();
       if(!panel.isConnected)return;
-      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 이 동의는 상대가 나의 정보를 보는 범위에만 적용됩니다. 현재 공개 가능한 항목은 소개·학력·재직의 검토 결과입니다. 사진·연락처·원본 증빙은 제공하지 않습니다. 직원이 선택한 동의 항목으로 자료를 만들고 별도 승인을 요청할 수 있습니다.'));
+      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 체크한 항목은 담당 직원이 요청하고 승인 담당자가 승인해야 상대 화면에 표시됩니다(동의만으로는 보이지 않습니다). 연락처는 만남 일정이 확정되고 두 사람 모두 동의해야 요청할 수 있습니다. 동의는 언제든 철회할 수 있고, 철회하면 상대 화면에서도 사라집니다.'));
       const form=el('form','sharing-form');const checks=[];
-      for(const [code,name] of Object.entries(scopeNames).filter(([code])=>['profile','education','employment'].includes(code))){
+      for(const [code,name] of Object.entries(scopeNames)){
         const label=el('label','check-label');const input=el('input');input.type='checkbox';input.value=code;
         input.checked=!!(data.own_grant?.active&&data.own_grant.scopes.includes(code));
-        label.append(input,el('span','',name));checks.push(input);form.append(label);
+        label.append(input,el('span','',name+(conditional[code]||'')));checks.push(input);form.append(label);
+        if(scopeHints[code])form.append(el('p','scope-hint',scopeHints[code]));
       }
       const lid='expiry-'+item.match_id;const label=el('label','','공개 만료일시 (최대 7일)');label.htmlFor=lid;
       const expiry=el('input');expiry.id=lid;expiry.type='datetime-local';expiry.required=true;
@@ -119,9 +126,17 @@ window.MatchingUI = (() => {
     try{
       const data=await(await ctx.api(`/api/me/matches/${item.match_id}/profile`)).json();if(!panel.isConnected)return;
       panel.replaceChildren(el('h4','','상대가 허용한 정보'));lab(data,panel);
-      if(!data.fields.length)panel.append(note('동의는 있지만 아직 연결된 공개 결과가 없습니다.'));
-      for(const field of data.fields){const r=el('div','result-row');r.append(el('strong','',scopeNames[field.scope]||field.label),el('p','',field.value),el('span','muted','검토일 '+date(field.reviewed_at)));panel.append(r);}
-      if(data.unavailable_scopes?.length)panel.append(note('자료 준비·연결 대기: '+data.unavailable_scopes.map(x=>scopeNames[x]).join(', ')));
+      // Every item is shown only after the counselor's request and the approver's approval (latest approved material).
+      let delivered=[];
+      try{delivered=(await(await ctx.api('/api/me/deliveries')).json()).items.filter(d=>d.match_id===item.match_id&&d.request_status==='approved');}catch(e){delivered=[];}
+      if(!panel.isConnected)return;
+      if(delivered.length){
+        const viewer=el('div','material-view');panel.append(viewer);
+        if(window.MaterialUI)await MaterialUI.show(delivered[0],viewer,ctx,{compact:true});
+      }else{
+        panel.append(note('상대가 공개에 동의한 항목: '+(data.consented_scopes||[]).map(x=>scopeNames[x]||x).join(', ')+' · 담당 직원 요청과 승인 담당자 승인 후 여기에 표시됩니다.'));
+      }
+      if(data.contact_pending)panel.append(note('연락처: 만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의해야 승인 요청할 수 있습니다.'));
       panel.append(el('p','muted','공개 기한 '+date(data.expires_at)));
     }catch(e){panel.replaceChildren(note(e.message));}
   }

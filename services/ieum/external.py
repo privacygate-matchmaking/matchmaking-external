@@ -81,12 +81,15 @@ def create_app(config=None, identity=None, upstream=None):
         return user
 
     @app.get('/auth/login')
-    def login(request: Request):
+    def login(request: Request, action: str | None=None):
         state, nonce, binding, verifier = [secrets.token_urlsafe(32) for _ in range(4)]
         sessions.flow(state, {'nonce':nonce,'binding':hashlib.sha256(binding.encode()).hexdigest(),'verifier':verifier})
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
         params = {'response_type':'code','client_id':config['client_id'],'redirect_uri':config['base']+'/auth/callback',
                   'scope':'openid','state':state,'nonce':nonce,'code_challenge':challenge,'code_challenge_method':'S256'}
+        if action=='password':
+            # 비밀번호는 이 서버가 받지 않는다: Keycloak 의 비밀번호 변경 화면(AIA)으로 보낸 뒤 일반 로그인처럼 돌아온다
+            params['kc_action']='UPDATE_PASSWORD'
         response = RedirectResponse(identity.discovery()['authorization_endpoint']+'?'+urlencode(params),302)
         response.set_cookie('external_login',binding,max_age=600,path='/auth',httponly=True,secure=config['secure'],samesite='lax')
         return response
@@ -185,13 +188,17 @@ def create_app(config=None, identity=None, upstream=None):
 
     @app.post('/api/me/evidence-files',status_code=201)
     async def evidence(request: Request, file: UploadFile=File(...),
-                       kind: Literal['education','employment']=Form('education'), user=Depends(current)):
+                       kind: Literal['education','employment','identity','marital','income','property','photo']=Form('education'),
+                       user=Depends(current)):
         body=await file.read(MAX_FILE+1)
         await file.close()
-        if not body or len(body)>MAX_FILE or not body.startswith(b'%PDF-'):
+        image=body.startswith(b'\xff\xd8\xff') or body.startswith(b'\x89PNG\r\n\x1a\n')
+        if not body or len(body)>MAX_FILE or (kind=='photo' and not image) or (kind!='photo' and not body.startswith(b'%PDF-')):
             deny('INVALID_REQUEST','invalid_evidence')
+        name,media=(('photo.jpg','image/jpeg') if body.startswith(b'\xff\xd8\xff') else ('photo.png','image/png')) if kind=='photo' \
+            else ('evidence.pdf','application/pdf')
         result=relay(request,'POST','/api/internal/evidence-submissions',
-                     data={'kind':kind},files={'file':('evidence.pdf',body,'application/pdf')})
+                     data={'kind':kind},files={'file':(name,body,media)})
         audit.record(request,'evidence.submit')
         return result.json()
 

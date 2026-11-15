@@ -30,9 +30,21 @@ def test_evidence_kind_survives_both_relays(env,kind):
 def test_unknown_evidence_kind_is_rejected_before_forwarding(env):
     user=login(env)
     count=len(env['state']['requests'])
-    response=env['e'].post('/api/me/evidence-files',data={'kind':'identity'},
+    response=env['e'].post('/api/me/evidence-files',data={'kind':'bank_statement'},
         files={'file':('proof.pdf',b'%PDF-test')},headers={'Origin':'https://testserver','X-CSRF-Token':user['csrf_token']})
     assert response.status_code==422 and len(env['state']['requests'])==count
+
+
+def test_photo_must_be_image_and_documents_pdf(env):
+    user=login(env)
+    count=len(env['state']['requests'])
+    h={'Origin':'https://testserver','X-CSRF-Token':user['csrf_token']}
+    assert env['e'].post('/api/me/evidence-files',data={'kind':'photo'},files={'file':('p.pdf',b'%PDF-test')},headers=h).status_code in (400,422)
+    assert env['e'].post('/api/me/evidence-files',data={'kind':'income'},files={'file':('p.jpg',b'\xff\xd8\xff\xe0x')},headers=h).status_code in (400,422)
+    assert len(env['state']['requests'])==count
+    for kind in ('identity','marital','income','property'):
+        assert env['e'].post('/api/me/evidence-files',data={'kind':kind},files={'file':('p.pdf',b'%PDF-test')},headers=h).status_code==201
+    assert env['e'].post('/api/me/evidence-files',data={'kind':'photo'},files={'file':('p.jpg',b'\xff\xd8\xff\xe0x')},headers=h).status_code==201
 
 
 def test_old_evidence_clients_default_to_education(env):
@@ -127,3 +139,20 @@ def test_initialization_preserves_keys_and_never_edits_base_env(tmp_path,base_va
     assert key.decode() not in first.stdout+second.stdout
     if base_value:assert base_value not in private+first.stdout+second.stdout
     else:assert private.partition('=')[2].strip() not in first.stdout+second.stdout
+
+
+def test_profile_update_needs_csrf_and_forwards_only_sent_fields(env):
+    user=login(env)
+    assert env['e'].get('/api/me/profile').json()['contact_phone']=='010-****-5678'
+    assert env['e'].patch('/api/me/profile',json={'height_cm':180}).status_code==403              # CSRF 없음
+    csrf={'Origin':'https://testserver','X-CSRF-Token':user['csrf_token']}
+    assert env['e'].patch('/api/me/profile',json={'height_cm':180},headers=csrf).status_code==200
+    assert env['state']['profile_body']=={'height_cm':180}
+    assert env['e'].patch('/api/me/profile',json={'height_cm':500},headers=csrf).status_code==422
+    assert env['e'].patch('/api/me/profile',json={'member_id':'other'},headers=csrf).status_code==422   # 다른 회원 지정 불가
+
+
+def test_password_change_goes_to_keycloak_not_this_server(env):
+    response=env['e'].get('/auth/login?action=password',follow_redirects=False)
+    assert response.status_code==302 and 'kc_action=UPDATE_PASSWORD' in response.headers['location']
+    assert 'kc_action' not in env['e'].get('/auth/login',follow_redirects=False).headers['location']

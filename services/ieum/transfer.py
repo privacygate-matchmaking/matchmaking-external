@@ -16,6 +16,14 @@ from .core import MAX_FILE, Audit, Database, application, deny, iso, now, plain,
 from .identity import Identity, bearer, principal
 from .models import Consent, Empty, Release
 from .matching_release import PURPOSE as MATCHING_PURPOSE, check_release, grant_context, register_releases
+
+# 학력·재직·신분증·혼인관계·소득·부동산은 PDF, 프로필 사진은 JPEG/PNG
+EvidenceKind=Literal['education','employment','identity','marital','income','property','photo']
+
+
+def evidence_format_ok(kind,content):
+    if kind=='photo':return content.startswith(b'\xff\xd8\xff') or content.startswith(b'\x89PNG\r\n\x1a\n')
+    return content.startswith(b'%PDF-')
 from privacygate.errors import GateError
 
 PROFILE_FIELDS={'schema_version','member_id','display_name','age_band','job_group','introduction'}
@@ -325,7 +333,11 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 if status=='approved' and row['purpose']==MATCHING_PURPOSE:
                     try:grant_context(db,row['consent_id'])
                     except GateError:status='consent_required'
-                result.append({'delivery_id':row['delivery_id'],'approval_id':row['approval_id'],'file_id':row['approved_file_id'],
+                match_id=None
+                if row['purpose']==MATCHING_PURPOSE:
+                    grant=db.execute('SELECT match_id FROM matching_grants WHERE grant_id=%s',(str(row['consent_id']),)).fetchone()
+                    match_id=str(plain(grant)['match_id']) if grant else None
+                result.append({'match_id':match_id,'delivery_id':row['delivery_id'],'approval_id':row['approval_id'],'file_id':row['approved_file_id'],
                     'file_version':row['approved_file_version'],'purpose':row['purpose'],'request_status':status,
                     'expires_at':iso(min(stamp(row['expires_at']),stamp(row['approval_expires_at']))),
                     'downloaded_at':row['downloaded_at'],'download_url':f'/api/me/deliveries/{row["delivery_id"]}/download'})
@@ -369,13 +381,15 @@ def create_app(config=None, identity=None, database=None, internal=None):
 
     @app.post('/api/internal/evidence-submissions',status_code=201)
     async def evidence_submit(request: Request,file: UploadFile=File(...),
-                              kind: Literal['education','employment']=Form('education'),user=Depends(member)):
+                              kind: EvidenceKind=Form('education'),user=Depends(member)):
         content=await file.read(MAX_FILE+1)
         await file.close()
-        if not content or len(content)>MAX_FILE or not content.startswith(b'%PDF-'):
+        if not content or len(content)>MAX_FILE or not evidence_format_ok(kind,content):
             deny('INVALID_REQUEST','invalid_evidence')
+        name,media=(('photo.jpg','image/jpeg') if content.startswith(b'\xff\xd8\xff') else ('photo.png','image/png')) \
+            if kind=='photo' else ('evidence.pdf','application/pdf')
         return upstream('POST','/api/evidence-files',request,data={'kind':kind},
-                        files={'file':('evidence.pdf',content,'application/pdf')}).json()
+                        files={'file':(name,content,media)}).json()
 
     @app.get('/api/internal/evidence-submissions')
     def evidence_status(request: Request,user=Depends(member)):

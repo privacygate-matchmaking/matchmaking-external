@@ -40,6 +40,8 @@ test('staff sends only explicitly selected supported consent scopes',async()=>{
     grant_id:'g1',owner_label:'Owner',recipient_label:'Recipient',active:true,can_prepare:true,
     supported_scopes:['education','employment'],scopes:['education','employment'],expires_at:'2026-12-01'}]};
   await c.window.StaffMatchingUI.render({root,api:async(p,o)=>{if(o)sent.push({p,o});return {items:[item]};}});
+  assert.equal(nodes(root).some(n=>n.tagName==='form'),false);           // list first, detail on demand
+  nodes(root).find(n=>n.textContent==='상세').onclick();
   const checks=nodes(root).filter(n=>n.tagName==='input');checks[1].checked=false;
   await nodes(root).find(n=>n.tagName==='form').onsubmit({preventDefault(){}});
   assert.equal(sent[0].p,'/api/matching/releases');

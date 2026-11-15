@@ -91,9 +91,12 @@ def env(tmp_path):
                 return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
             if state.get('release_review_fail'):
                 return httpx.Response(409,json={'error':{'code':'INVALID_STATE'}})
-            return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
-                {'scope':s,'label':s,'value':state.get('release_value','REVIEWED-TEXT'),
-                 'review_status':'reviewed','reviewed_at':'2026-01-01T00:00:00Z'} for s in body['scopes']]})
+            fields=[{'scope':s,'label':s,'value':state.get('release_value','REVIEWED-TEXT'),
+                     'review_status':'reviewed','reviewed_at':'2026-01-01T00:00:00Z'} for s in body['scopes']]
+            for f in fields:
+                if f['scope'] in ('photo','documents') and state.get('release_attachment'):
+                    f['attachments']=[state['release_attachment']]
+            return httpx.Response(200,json={'member_id':body['member_id'],'fields':fields})
         if req.url.path=='/api/internal/disclosure-checks':
             return httpx.Response(200,json={'allowed':state['allowed'],'expires_at':state['consent_expires'],
               'member_id':state.get('disclosure_member_id',M)})
@@ -109,7 +112,7 @@ def env(tmp_path):
             if not subject:return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
             return httpx.Response(200,json=synthetic_directory(subject).model_dump(mode='json'))
         if state.get('matching') and req.url.path=='/api/internal/matching-disclosures':
-            body=json.loads(req.content)
+            body=json.loads(req.content);state['disclosure_body']=body
             return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
               {'scope':'employment','label':'재직','value':'합성 연구직','review_status':'reviewed','reviewed_at':iso(now())},
               {'scope':'contact','label':'연락처','value':'SYNTHETIC-CONTACT','review_status':'reviewed','reviewed_at':iso(now())}]})
@@ -118,6 +121,9 @@ def env(tmp_path):
         if req.url.path=='/api/internal/my-status':
             if state.get('status_unavailable'):return httpx.Response(501,json={})
             return httpx.Response(200,json=state.get('member_status',{'status':'active','message':None}))
+        if req.url.path=='/api/internal/my-profile':
+            if req.method=='PATCH':state['profile_body']=json.loads(req.content)
+            return httpx.Response(200,json={'height_cm':175,'weight_kg':70,'contact_phone':'010-****-5678','contact_email':None,'photo':{'latest':None,'approved_at':None}})
         if req.url.path=='/api/internal/my-withdrawal':
             state['withdrawal_body']=json.loads(req.content)
             state['member_status']={'status':'withdraw_pending','by':'self','can_cancel':True,

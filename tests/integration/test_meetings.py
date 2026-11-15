@@ -23,16 +23,22 @@ def options(timestamp,count=1):
 def meeting(service):
     purchase(service);match=propose(service);service.decide(C,match['match_id'],'accept')
     meetings=Meetings(service)
-    batch=meetings.propose(match['match_id'],A,options(service.clock(),2),allow)
+    batch=meetings.propose(match['match_id'],B,options(service.clock(),2))
     return meetings,service,match['match_id'],batch['items'][0]['proposal_id']
 
 
 def test_both_members_and_staff_confirmation_are_separate(meeting):
     meetings,s,mid,pid=meeting
+    proposed=meetings.list(mid,B)['items'][0]
+    assert proposed['proposed_by_me'] and proposed['my_reply']['availability']=='available'
+    assert meetings.list(mid,C)['items'][0]['proposed_by_me'] is False
     reason('both_members_required',lambda:meetings.confirm(mid,pid,A,allow))
-    meetings.reply(mid,pid,B,Availability(availability='available'))
-    reason('both_members_required',lambda:meetings.confirm(mid,pid,A,allow))
+    from ieum.matching_release import meeting_state
+    with s.transaction() as (db,t):
+        pair=meetings.active_match(db,mid)
+        assert meeting_state(db,pair,t)=='proposed'
     meetings.reply(mid,pid,C,Availability(availability='available'))
+    with s.transaction() as (db,t):assert meeting_state(db,pair,t)=='awaiting_approval'
     row=meetings.list(mid,B)['items'][0]
     assert row['status']=='proposed' and row['both_available']
     confirmed=meetings.confirm(mid,pid,A,allow)
@@ -43,21 +49,21 @@ def test_both_members_and_staff_confirmation_are_separate(meeting):
 
 def test_private_notes_are_not_shared_with_peer_or_audit(meeting):
     meetings,s,mid,pid=meeting
-    meetings.reply(mid,pid,B,Availability(availability='change_requested',private_note='PRIVATE-B-NOTE'))
-    assert meetings.list(mid,B)['items'][0]['my_reply']['private_note']=='PRIVATE-B-NOTE'
-    assert 'PRIVATE-B-NOTE' not in str(meetings.list(mid,C))
+    meetings.reply(mid,pid,C,Availability(availability='change_requested',private_note='PRIVATE-C-NOTE'))
+    assert meetings.list(mid,C)['items'][0]['my_reply']['private_note']=='PRIVATE-C-NOTE'
+    assert 'PRIVATE-C-NOTE' not in str(meetings.list(mid,B))
     staff=meetings.list(mid,authorize=allow)
-    assert staff['items'][0]['replies'][0]['private_note']=='PRIVATE-B-NOTE'
-    other_staff=meetings.list(mid,authorize=lambda pair,action:{C})
-    assert 'PRIVATE-B-NOTE' not in str(other_staff)
-    assert other_staff['items'][0]['replies'][0]['availability']=='change_requested'
+    assert 'PRIVATE-C-NOTE' in str(staff['items'][0]['replies'])
+    other_staff=meetings.list(mid,authorize=lambda pair,action:{B})
+    assert 'PRIVATE-C-NOTE' not in str(other_staff)
+    assert any(r['availability']=='change_requested' for r in other_staff['items'][0]['replies'])
 
 
 def test_new_round_invalidates_old_replies_and_changed_details_need_new_ids(meeting):
     meetings,s,mid,pid=meeting
-    for user in (B,C):meetings.reply(mid,pid,user,Availability(availability='available'))
-    new=meetings.propose(mid,A,options(s.clock()+timedelta(days=1)),allow)['items'][0]
-    assert new['proposal_id']!=pid and new['both_available'] is False
+    meetings.reply(mid,pid,C,Availability(availability='change_requested'))
+    new=meetings.propose(mid,C,options(s.clock()+timedelta(days=1)))['items'][0]
+    assert new['proposal_id']!=pid and new['both_available'] is False and new['proposed_by_me']
     reason('meeting_not_open',lambda:meetings.confirm(mid,pid,A,allow))
     reason('meeting_not_open',lambda:meetings.reply(mid,pid,B,Availability(availability='available')))
     reason('both_members_required',lambda:meetings.confirm(mid,new['proposal_id'],A,allow))
@@ -94,7 +100,8 @@ def test_invalid_options_do_not_replace_current_round(meeting):
         MeetingOptions(options=[MeetingOption(starts_at=s.clock()+timedelta(days=181),venue='카페',address='주소')]),
         MeetingOptions(options=[MeetingOption(starts_at=s.clock()+timedelta(days=1),venue='  ',address='주소')]),
     ):
-        reason('meeting_option_invalid',lambda:meetings.propose(mid,A,payload,allow))
+        reason('meeting_option_invalid',lambda:meetings.propose(mid,B,payload))
+    reason('match_missing',lambda:meetings.propose(mid,D,options(s.clock())))
     assert meetings.list(mid,B)['items'][0]['status']=='proposed'
     with pytest.raises(ValidationError):Availability(availability='available',private_note='x'*301)
     with pytest.raises(ValidationError):Availability(availability='available',user_id=D)
@@ -122,8 +129,10 @@ def web_meeting(lab):
     purchase(s);match=propose(s);s.decide(C,match['match_id'],'accept')
     lab['state']['staff_scope_allowed']=True
     mid=match['match_id']
-    response=lab['t'].post(f'/api/matching/requests/{mid}/meetings',headers=headers(),
-        json=options(now()).model_dump(mode='json'))
+    me=login(lab);csrf={'Origin':'https://testserver','X-CSRF-Token':me['csrf_token']}
+    body=options(now()).model_dump(mode='json')
+    assert lab['e'].post(f'/api/me/matches/{mid}/meetings',json=body).status_code==403
+    response=lab['e'].post(f'/api/me/matches/{mid}/meetings',headers=csrf,json=body)
     assert response.status_code==201,response.text
     return lab,mid,response.json()['items'][0]['proposal_id']
 
@@ -150,13 +159,28 @@ def test_real_relay_and_bff_schedule_flow(web_meeting):
 
 def test_staff_scope_is_checked_on_every_operation_and_cannot_be_faked(web_meeting):
     lab,mid,pid=web_meeting;t=lab['t'];path=f'/api/matching/requests/{mid}/meetings'
+    assert t.get(path,headers=headers()).status_code==200
     assert lab['state']['staff_scope_body']['participant_user_ids']==[B,C]
     assert t.get(path,headers=headers('MEMBER')).status_code==401
     assert t.get(path,headers=headers('APPROVER')).status_code==403
     lab['state']['staff_scope_allowed']=False
     assert t.get(path,headers=headers()).status_code==403
     assert t.get('/api/matching/requests',headers=headers()).json()['items']==[]
-    assert t.post(path,headers=headers(),json=options(now()).model_dump(mode='json')).status_code==403
+    assert t.post(path,headers=headers(),json=options(now()).model_dump(mode='json')).status_code in (404,405)
     assert t.post(path+f'/{pid}/confirm',headers=headers(),json={}).status_code==403
     lab['state']['staff_scope_unavailable']=True
     assert t.get(path,headers=headers()).status_code==500
+
+
+def test_counterpart_accepts_only_one_option_and_proposer_edits_until_accepted(meeting):
+    meetings,s,mid,pid=meeting
+    first,second=[i['proposal_id'] for i in meetings.list(mid,C)['items']]
+    meetings.reply(mid,first,C,Availability(availability='available'))
+    meetings.reply(mid,second,C,Availability(availability='available'))
+    rows={i['proposal_id']:i for i in meetings.list(mid,C)['items']}
+    assert rows[second]['both_available'] and not rows[first]['both_available']
+    assert rows[first]['my_reply']['availability']=='change_requested'
+    reason('meeting_already_accepted',lambda:meetings.propose(mid,B,options(s.clock()+timedelta(days=1))))
+    meetings.reply(mid,second,C,Availability(availability='change_requested'))
+    edited=meetings.propose(mid,B,options(s.clock()+timedelta(days=1)))['items']
+    assert len(edited)==1 and {i['status'] for i in meetings.list(mid,B)['items'] if i['proposal_id'] in (first,second)}=={'superseded'}

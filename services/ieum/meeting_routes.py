@@ -54,12 +54,6 @@ def register_meetings(app,matching,member,counselor,upstream,config,audit):
     def staff_list(match_id: UUID,request: Request,user=Depends(counselor)):
         return meetings.list(match_id,authorize=authorization(request,user))
 
-    @app.post('/api/matching/requests/{match_id}/meetings',status_code=201)
-    def propose(match_id: UUID,body: MeetingOptions,request: Request,user=Depends(counselor)):
-        result=meetings.propose(match_id,user['user_id'],body,authorization(request,user))
-        record(request,'meeting.propose',result['round_id'])
-        return result
-
     @app.post('/api/matching/requests/{match_id}/meetings/{proposal_id}/confirm')
     def confirm(match_id: UUID,proposal_id: UUID,request: Request,body: Empty=Body(...),user=Depends(counselor)):
         result=meetings.confirm(match_id,proposal_id,user['user_id'],authorization(request,user))
@@ -75,6 +69,12 @@ def register_meetings(app,matching,member,counselor,upstream,config,audit):
     @app.get('/api/internal/matching/requests/{match_id}/meetings')
     def member_list(match_id: UUID,request: Request,user=Depends(member)):
         return meetings.list(match_id,user['user_id'])
+
+    @app.post('/api/internal/matching/requests/{match_id}/meetings',status_code=201)
+    def member_propose(match_id: UUID,body: MeetingOptions,request: Request,user=Depends(member)):
+        result=meetings.propose(match_id,user['user_id'],body)
+        record(request,'meeting.propose',result['round_id'])
+        return result
 
     @app.post('/api/internal/matching/requests/{match_id}/meetings/{proposal_id}/reply')
     def reply(match_id: UUID,proposal_id: UUID,body: Availability,request: Request,user=Depends(member)):

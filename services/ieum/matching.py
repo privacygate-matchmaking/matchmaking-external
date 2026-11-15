@@ -12,7 +12,8 @@ from .core import deny, iso, now, plain, stamp, uid
 
 PLAN={'code':'ieum_6m_5','name':'이음 정회원','amount_won':3300000,
       'credits':5,'months':6,'currency':'KRW','vat_included':True}
-SCOPES=('profile','photo','contact','education','employment','income','marital_status')
+SCOPES=('name','profile','photo','contact','education','employment','income','marital_status','property','documents')
+Scope=Literal['name','profile','photo','contact','education','employment','income','marital_status','property','documents']
 
 
 class Input(BaseModel):
@@ -34,7 +35,7 @@ class Decision(Input):
 
 
 class Sharing(Input):
-    scopes: list[Literal['profile','photo','contact','education','employment','income','marital_status']]=Field(min_length=1,max_length=7)
+    scopes: list[Scope]=Field(min_length=1,max_length=10)
     expires_at: AwareDatetime
 
 

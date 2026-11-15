@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 from datetime import timedelta
 from uuid import uuid4
@@ -67,7 +69,7 @@ def test_new_release_rejects_before_file_creation(release_env,fault):
     env,_,_,grant=release_env
     body={'grant_id':grant['grant_id'],'scopes':['education']}
     if fault=='unassigned':env['state']['release_assigned']=False
-    if fault=='unsupported':body['scopes']=['contact']
+    if fault=='unsupported':body['scopes']=['contact']      # 상호 동의·일정 확정 전 연락처
     if fault=='not_granted':body['scopes']=['employment']
     if fault=='missing_grant':body['grant_id']=str(uuid4())
     if fault=='review':env['state']['release_review_fail']=True
@@ -118,3 +120,54 @@ def test_member_and_approver_cannot_prepare_or_list_staff_data(release_env):
     for token in ('MEMBER','APPROVER'):
         assert env['t'].get('/api/matching/overview',headers=headers(token)).status_code in (401,403)
         assert env['t'].post('/api/matching/releases',headers=headers(token),json={'grant_id':grant['grant_id'],'scopes':['education']}).status_code in (401,403)
+
+
+def confirm_meeting(env,match_id):
+    with env['transfer'].state.database.connection() as db:
+        db.execute("""INSERT INTO matching_meeting_proposals (proposal_id,round_id,match_id,proposed_by,starts_at,venue,address,status,created_at,confirmed_at,confirmed_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'confirmed',%s,%s,%s)""",(str(uuid4()),str(uuid4()),match_id,'staff',now()+timedelta(days=2),'카페','서울',now(),now(),'staff'))
+
+
+def test_contact_needs_mutual_consent_confirmed_meeting_and_approval(release_env):
+    env,service,pair,_=release_env
+    grant=service.share(B,pair['match_id'],Sharing(scopes=['contact','education'],expires_at=now()+timedelta(hours=1)))
+    body={'grant_id':grant['grant_id'],'scopes':['contact']}
+    r=env['t'].post('/api/matching/releases',headers=headers(),json=body)
+    assert r.status_code==403 and '모두 연락처' in r.text,r.text     # 상대 동의 없음
+    service.share(C,pair['match_id'],Sharing(scopes=['contact'],expires_at=now()+timedelta(hours=1)))
+    r=env['t'].post('/api/matching/releases',headers=headers(),json=body)
+    assert r.status_code==403 and '일정이 확정' in r.text,r.text            # 일정 미확정
+    item=env['t'].get('/api/matching/overview',headers=headers()).json()['items'][0]
+    owner=[g for g in item['grants'] if g['owner_id']==B][0]
+    assert owner['contact_ready'] is False and 'contact' not in owner['supported_scopes'] and item['meeting_state']=='none'
+    confirm_meeting(env,pair['match_id'])
+    assert env['t'].get('/api/matching/overview',headers=headers()).json()['items'][0]['meeting_state']=='confirmed'
+    r=env['t'].post('/api/matching/releases',headers=headers(),json=body);assert r.status_code==201,r.text
+    approval=env['t'].post(f'/api/export-requests/{r.json()["request_id"]}/approve',headers=headers('APPROVER'),json={})
+    assert approval.status_code==200,approval.text
+    assert download(release_env,approval.json()).status_code==200
+    listed=env['t'].post('/api/internal/delivery-queries',headers={'Authorization':'Bearer SVC_EXTERNAL','X-User-Token':'OTHER'},json={})
+    assert any(d['match_id']==pair['match_id'] and d['request_status']=='approved' for d in listed.json()['items'])
+    service.revoke(C,pair['match_id'])                                                    # 상대가 연락처 동의 철회
+    assert download(release_env,approval.json()).status_code==403
+
+
+def image(data=b'\x89PNG\r\n\x1a\n'+b'0'*32):
+    return {'name':'photo.png','label':'사진','media_type':'image/png','sha256':hashlib.sha256(data).hexdigest(),
+            'data_base64':base64.b64encode(data).decode()}
+
+
+def test_photo_attachment_is_verified_before_release(release_env):
+    env,service,pair,_=release_env
+    grant=service.share(B,pair['match_id'],Sharing(scopes=['photo'],expires_at=now()+timedelta(hours=1)))
+    bad=image();bad['sha256']='0'*64
+    env['state']['release_attachment']=bad
+    r=env['t'].post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['photo']})
+    assert r.status_code>=400 and list((env['root']/'verified').iterdir())==[]
+    env['state']['release_attachment']=image()
+    r=env['t'].post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['photo']})
+    assert r.status_code==201,r.text
+    approval=env['t'].post(f'/api/export-requests/{r.json()["request_id"]}/approve',headers=headers('APPROVER'),json={})
+    received=download(release_env,approval.json()).json()
+    assert received['fields'][0]['attachments'][0]['media_type']=='image/png'
+

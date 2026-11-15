@@ -4,24 +4,51 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import Body, Depends, Request
-from pydantic import AwareDatetime, Field, ValidationError
+import base64
+import binascii
+import hashlib
+
+from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from .core import deny, iso, now, stamp
-from .matching import Matching, Directory, Input, Order, Proposal, Decision, Sharing, SCOPES, public, synthetic_directory
+from .matching import Matching, Directory, Input, Order, Proposal, Decision, Sharing, SCOPES, Scope, public, synthetic_directory
 from .models import Empty
 
 
+class Attachment(Input):
+    """검토·마스킹 사본·검토된 사진 (반출 자료 전용). 형식·해시·파일 머리를 모두 확인한다."""
+    name: str=Field(min_length=1,max_length=80,pattern=r'^[A-Za-z0-9._-]+$')
+    label: str=Field(min_length=1,max_length=80)
+    media_type: Literal['image/png','image/jpeg']
+    sha256: str=Field(pattern=r'^[0-9a-f]{64}$')
+    data_base64: str=Field(min_length=4,max_length=700_000)
+
+    @model_validator(mode='after')
+    def check(self):
+        try:blob=base64.b64decode(self.data_base64,validate=True)
+        except (ValueError,binascii.Error):raise ValueError('attachment_base64')
+        magic={'image/png':b'\x89PNG\r\n\x1a\n','image/jpeg':b'\xff\xd8\xff'}[self.media_type]
+        if not blob.startswith(magic) or hashlib.sha256(blob).hexdigest()!=self.sha256:
+            raise ValueError('attachment_mismatch')
+        return self
+
+
 class ResultField(Input):
-    scope: Literal['profile','photo','contact','education','employment','income','marital_status']
+    scope: Scope
     label: str=Field(min_length=1,max_length=80)
     value: str=Field(min_length=1,max_length=300)
     review_status: Literal['reviewed']
     reviewed_at: AwareDatetime
+    attachments: list[Attachment]|None=Field(default=None,max_length=5)
 
 
 class Result(Input):
     member_id: UUID
-    fields: list[ResultField]=Field(max_length=7)
+    fields: list[ResultField]=Field(max_length=10)
+
+
+# 화면 열람 없이 직원 요청 + 승인자 승인 자료로만 제공하는 항목
+RELEASE_ONLY=SCOPES   # 모든 항목: 직원 요청 + 승인자 승인 자료로만 상대에게 표시
 
 
 def register_matching(app,config,database,member,upstream,audit):
@@ -118,27 +145,21 @@ def register_matching(app,config,database,member,upstream,audit):
 
     @app.get('/api/internal/matching/requests/{match_id}/profile')
     def profile(match_id: UUID,request: Request,user=Depends(member)):
+        """Consent summary only. Every item becomes visible to the other member only as approved material
+        (counselor request + approver approval); the screen shows it from the member's approved deliveries."""
         context=service.disclosure(user['user_id'],match_id)
         d=directory(request,user);check_peer(d,context)
-        if mode=='synthetic':
-            peer=next(p for p in d.items if str(p.member_id)==context['member_id'])
-            examples={'profile':peer.introduction,'education':'합성 학력: 졸업자료 검토 예시',
-                'employment':'합성 재직: '+peer.job_group,'income':'합성 소득 구간: 5천만~7천만원',
-                'marital_status':'합성 혼인상태 검토 예시'}
-            result=Result(member_id=peer.member_id,fields=[ResultField(scope=k,label=k,value=v,review_status='reviewed',reviewed_at=now())
-                for k,v in examples.items() if k in context['scopes']])
-        else:
-            try:
-                result=Result.model_validate(upstream('POST','/api/internal/matching-disclosures',request,json={**context,'purpose':'introduction'}).json())
-            except (ValidationError,ValueError):
-                deny('INTERNAL_ERROR','matching_disclosure_invalid','검토·마스킹 결과의 응답 형식을 확인해주세요.')
-        if str(result.member_id)!=context['member_id']:deny('ACCESS_DENIED','disclosure_subject_mismatch')
-        # Recheck after internal work: a concurrent revoke/end must not release the result.
-        current=service.disclosure(user['user_id'],match_id)
-        if current['grant_id']!=context['grant_id']:deny('CONSENT_INVALID','consent_changed')
-        fields=[f.model_dump(mode='json') for f in result.fields if f.scope in current['scopes']]
+        contact_ok=False
+        if 'contact' in context['scopes']:
+            from .matching_release import contact_ready
+            from .core import plain
+            with service.transaction() as (db,t):
+                grant=db.execute('SELECT * FROM matching_grants WHERE grant_id=%s',(str(context['grant_id']),)).fetchone()
+                contact_ok=bool(grant) and contact_ready(db,plain(grant),strict=False)
         record(request,'matching.profile_view',match_id)
-        return {'member_id':str(result.member_id),'fields':fields,'expires_at':current['expires_at'],
-                'data_source':mode,'unavailable_scopes':[s for s in current['scopes'] if s not in {f['scope'] for f in fields}]}
+        return {'member_id':context['member_id'],'fields':[],'expires_at':context['expires_at'],'data_source':mode,
+                'approval_required':True,'consented_scopes':context['scopes'],
+                'contact_pending':'contact' in context['scopes'] and not contact_ok,
+                'release_only_scopes':context['scopes'],'unavailable_scopes':[]}
 
     app.state.matching=service

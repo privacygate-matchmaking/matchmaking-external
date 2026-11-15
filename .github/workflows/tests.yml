@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/frontend/account.test.cjs tests/frontend/meetings.test.cjs
+      - run: node --test tests/frontend/account.test.cjs tests/frontend/meetings.test.cjs tests/frontend/material.test.cjs
   observability-tools:
     runs-on: ubuntu-latest
     steps:

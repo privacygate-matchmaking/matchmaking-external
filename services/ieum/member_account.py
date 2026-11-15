@@ -12,6 +12,14 @@ class Withdrawal(Strict):
     reason: str | None = Field(default=None, max_length=200)
 
 
+class ProfileUpdate(Strict):
+    """내 계정: 키·몸무게(본인 신고)·연락처. 형식 검사와 저장은 내부가 최종 판단한다."""
+    height_cm: int | None = Field(default=None, ge=120, le=230)
+    weight_kg: int | None = Field(default=None, ge=30, le=200)
+    contact_phone: str | None = Field(default=None, max_length=20)
+    contact_email: str | None = Field(default=None, max_length=200)
+
+
 class MemberStatus(BaseModel):
     status: Literal['active','withdraw_pending','withdrawn','not_registered']
     by: Literal['self','staff'] | None = None
@@ -43,6 +51,16 @@ def register_account_relay(app,member,upstream,audit,enabled):
         audit.record(request,'member.withdrawal')
         return result
 
+    @app.get('/api/internal/member-profile')
+    def profile(request: Request,user=Depends(member)):
+        return upstream('GET','/api/internal/my-profile',request).json()
+
+    @app.patch('/api/internal/member-profile')
+    def profile_update(body: ProfileUpdate,request: Request,user=Depends(member)):
+        result=upstream('PATCH','/api/internal/my-profile',request,json=body.model_dump(exclude_unset=True)).json()
+        audit.record(request,'member.profile_update')
+        return result
+
     @app.post('/api/internal/member-withdrawal/cancel')
     def cancel(request: Request,body: Empty=Body(...),user=Depends(member)):
         if not enabled():deny('INVALID_STATE','member_lifecycle_not_enabled','회원 상태 연동을 활성화한 뒤 사용할 수 있습니다.')
@@ -61,6 +79,16 @@ def register_account_bff(app,current,relay,audit):
     def withdraw(body: Withdrawal,request: Request,user=Depends(current)):
         result=relay(request,'POST','/api/internal/member-withdrawal',json=body.model_dump()).json()
         audit.record(request,'member.withdrawal')
+        return result
+
+    @app.get('/api/me/profile')
+    def profile(request: Request,user=Depends(current)):
+        return relay(request,'GET','/api/internal/member-profile').json()
+
+    @app.patch('/api/me/profile')
+    def profile_update(body: ProfileUpdate,request: Request,user=Depends(current)):
+        result=relay(request,'PATCH','/api/internal/member-profile',json=body.model_dump(exclude_unset=True)).json()
+        audit.record(request,'member.profile_update')
         return result
 
     @app.post('/api/me/withdrawal/cancel')

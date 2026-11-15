@@ -212,8 +212,9 @@ def test_real_bff_matching_wallet_flow_csrf_and_field_filter(lab):
     s.share(C,mid,Sharing(scopes=['employment'],expires_at=now()+timedelta(days=1)))
     result=e.get(f'/api/me/matches/{mid}/profile')
     assert result.status_code==200,result.text
-    assert [x['scope'] for x in result.json()['fields']]==['employment']
-    assert 'SYNTHETIC-CONTACT' not in result.text
+    assert result.json()['fields']==[] and result.json()['approval_required'] is True     # 동의만으로는 값이 보이지 않음
+    assert result.json()['consented_scopes']==['employment']
+    assert 'SYNTHETIC-CONTACT' not in result.text and '합성 연구직' not in result.text
     assert e.get('/api/me').status_code==200
 
 
@@ -223,3 +224,22 @@ def test_unimplemented_directory_stays_fail_closed(env):
     assert result.status_code==500
     assert '아직 구현' in result.json()['error']['message']
     assert env['e'].get('/api/me').status_code==200
+
+
+def test_profile_shows_no_values_before_approval_and_tracks_contact_conditions(lab):
+    from uuid import uuid4 as new_id
+    me=login(lab);e=lab['e'];h={'X-CSRF-Token':me['csrf_token'],'Origin':'https://testserver'}
+    peer=e.get('/api/me/candidates').json()['items'][0]
+    o=e.post('/api/me/orders',headers=h,json={'plan_code':'ieum_6m_5','idempotency_key':str(uuid4())}).json()
+    e.post(f'/api/me/orders/{o["order_id"]}/test-confirm',headers=h,json={})
+    mid=e.post('/api/me/matches',headers=h,json={'recipient_member_id':peer['member_id'],'idempotency_key':str(uuid4())}).json()['match_id']
+    s=lab['transfer'].state.matching;s.decide(C,mid,'accept')
+    s.share(C,mid,Sharing(scopes=['employment','contact','name'],expires_at=now()+timedelta(days=1)))
+    s.share(B,mid,Sharing(scopes=['contact'],expires_at=now()+timedelta(days=1)))
+    view=e.get(f'/api/me/matches/{mid}/profile').json()
+    assert view['fields']==[] and view['contact_pending'] is True and 'SYNTHETIC-CONTACT' not in str(view)
+    with lab['transfer'].state.database.connection() as db:
+        db.execute("""INSERT INTO matching_meeting_proposals (proposal_id,round_id,match_id,proposed_by,starts_at,venue,address,status,created_at,confirmed_at,confirmed_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,'confirmed',%s,%s,%s)""",(str(new_id()),str(new_id()),mid,B,now()+timedelta(days=2),'카페','서울',now(),now(),'staff'))
+    view=e.get(f'/api/me/matches/{mid}/profile').json()
+    assert view['fields']==[] and view['contact_pending'] is False                     # 조건 충족이어도 승인 전엔 값 없음

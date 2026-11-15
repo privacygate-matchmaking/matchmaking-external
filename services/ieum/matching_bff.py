@@ -2,7 +2,7 @@ from uuid import UUID
 from fastapi import Body, Depends, Request
 from .matching import Order, Proposal, Decision, Sharing
 from .models import Empty
-from .meetings import Availability
+from .meetings import Availability, MeetingOptions
 
 
 def register_matching_bff(app,current,relay,audit):
@@ -57,6 +57,10 @@ def register_matching_bff(app,current,relay,audit):
     @app.get('/api/me/matches/{match_id}/meetings')
     def meetings(match_id: UUID,request: Request,user=Depends(current)):
         return call(request,'GET',f'requests/{match_id}/meetings')
+
+    @app.post('/api/me/matches/{match_id}/meetings',status_code=201)
+    def propose_meeting(match_id: UUID,body: MeetingOptions,request: Request,user=Depends(current)):
+        return call(request,'POST',f'requests/{match_id}/meetings',body.model_dump(mode='json'))
 
     @app.post('/api/me/matches/{match_id}/meetings/{proposal_id}/reply')
     def availability(match_id: UUID,proposal_id: UUID,body: Availability,request: Request,user=Depends(current)):
