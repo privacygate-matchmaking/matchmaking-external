@@ -2,11 +2,11 @@
 window.MatchingUI = (() => {
   const scopeNames = {name:'이름',profile:'소개 정보',education:'학력 검토 결과',employment:'재직 검토 결과',income:'소득 구간',marital_status:'혼인관계 검토 결과',property:'부동산 보유 검토 결과',photo:'프로필 사진',documents:'검토·마스킹된 문서 사본',contact:'연락처'};
   const scopeHints = {name:'승인되면 상대 화면의 소개 정보에서 "소개 상대" 대신 실명이 보입니다.',
-    photo:'직원이 검토한 사진(위치 등 정보 제거)입니다.',
+    photo:'직원이 검토한 사진(위치 등 정보 제거)입니다. 서로 사진 제공에 동의해야 서로의 사진을 볼 수 있습니다(나만 동의하면 상대도 내 사진을 볼 수 없습니다).',
     documents:'서류 심사를 통과한 학력·재직·소득·혼인·부동산 서류의 개인정보 가림 사본입니다. 원본은 제공하지 않습니다.',
     contact:'만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의한 뒤에만 승인 요청할 수 있습니다.'};
   const releaseOnly = [];
-  const conditional = {contact:' · 일정 확정 후'};
+  const conditional = {contact:' · 일정 확정 후',photo:' · 서로 제공 시'};
   const states = {pending:'응답 대기',matched:'매칭 성립',rejected:'거절',cancelled:'신청 취소',expired:'응답 기간 만료',ended:'관계 종료'};
   const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
   const date = x => x ? new Date(x).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
@@ -40,7 +40,7 @@ window.MatchingUI = (() => {
     const band=el('div','wallet-band');
     band.append(el('div','',w.active?`사용 가능 ${w.available}개 · 예약 ${w.reserved}개 · 사용 ${w.used}개`:'현재 일반회원입니다.'),
       el('span','muted',w.active?'이용 기한 '+date(w.expires_at):'신청은 정회원 이용권이 필요합니다. 받은 신청에는 응답할 수 있습니다.'));
-    root.append(band);
+    root.append(band,rulesBox(data.self,w));
     if(!data.items.length){root.append(empty('현재 소개 가능한 후보가 없습니다. 진행 중이거나 성사된 상대는 매칭 현황에서 확인하세요.'));return;}
     const grid=el('div','candidate-grid');grid.tabIndex=0;grid.setAttribute('aria-label','소개 후보 (옆으로 넘겨 보기)');
     const cards=[];
@@ -61,7 +61,7 @@ window.MatchingUI = (() => {
       },true);
       b.disabled=!w.active||w.available<1||!data.self.eligible||Boolean(item.retry_at);
       if(closed)c.append(note((lastText[item.last_status]||'이전 매칭 기록이 있는 상대입니다.')+(item.retry_at?` ${date(item.retry_at)} 이후 다시 신청할 수 있습니다.`:' 다시 신청할 수 있습니다.')));
-      if(!data.self.eligible)c.append(note('회원 검토가 완료된 후 신청할 수 있습니다.'));
+      if(!data.self.eligible)c.append(note('위 매칭 조건(신분증·학력·프로필 사진 승인)을 모두 갖춘 뒤 신청할 수 있습니다.'));
       c.append(b);cards.push(c);
     }
     // 분류: 전체 · 새 매칭 · 매칭 취소 (종료·거절·취소·만료된 상대는 서버가 맨 뒤로 보낸다)
@@ -91,7 +91,20 @@ window.MatchingUI = (() => {
     const head=el('div','candidate-head');head.append(countLine,filters);
     root.append(head,strip);
     show('all');
-    root.append(note('하루 신규 신청 3건 · 동시 대기 3건 · 응답 기한 72시간. 거절된 상대에게는 30일간 재신청할 수 없습니다.'));
+  }
+  // 매칭 조건: 필수 심사(신분증·학력·프로필 사진) + 정회원 이용권, 신청 규칙
+  function rulesBox(self,w) {
+    const r=self.requirements||{};
+    const box=el('section','match-rules');box.setAttribute('aria-label','매칭 조건');
+    box.append(el('h3','','매칭 조건'));
+    const list=el('ul','rule-checks');
+    const item=(ok,text,hint)=>{const li=el('li',ok?'ok':'todo');li.append(el('span','mark',ok?'✓':'!'),el('span','',text));if(!ok&&hint)li.append(el('small','muted',' '+hint));list.append(li);};
+    item(r.identity,'신분증(본인 확인) 심사 승인','증빙 관리에서 제출');
+    item(r.education,'졸업증명서(학력) 심사 승인','증빙 관리에서 제출');
+    item(r.photo,'프로필 사진 심사 승인','증빙 관리에서 제출');
+    item(Boolean(w.active&&w.available>0),'정회원 이용권 (매칭권 1개 이상)','이용권 탭에서 구매 · 받은 신청 응답은 이용권 없이 가능');
+    box.append(list,el('p','rule-note muted','후보에는 같은 조건(신분증·학력·프로필 사진 승인)을 갖춘 이성 회원만 보입니다. 신청은 하루 3건·동시 대기 3건, 응답 기한 72시간이며, 거절된 상대에게는 30일 동안 다시 신청할 수 없습니다. 프로필 사진은 매칭 후 서로 제공에 동의해야 서로 볼 수 있습니다.'));
+    return box;
   }
   function matches(data,ctx) {
     const {root}=ctx;
@@ -172,6 +185,7 @@ window.MatchingUI = (() => {
       }else{
         panel.append(note('상대가 공개에 동의한 항목: '+(data.consented_scopes||[]).map(x=>scopeNames[x]||x).join(', ')+' · 담당 직원 요청과 승인 담당자 승인 후 여기에 표시됩니다.'));
       }
+      if(data.photo_pending)panel.append(note('프로필 사진: 상대는 사진 제공에 동의했습니다. 나도 사진 제공에 동의해야 서로의 사진을 볼 수 있습니다.'));
       if(data.contact_pending)panel.append(note('연락처: 만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의해야 승인 요청할 수 있습니다.'));
       panel.append(el('p','muted','공개 기한 '+date(data.expires_at)));
     }catch(e){panel.replaceChildren(note(e.message));}

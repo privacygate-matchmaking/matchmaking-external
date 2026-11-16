@@ -64,3 +64,16 @@
 .candidate-tag{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#4f5b55;letter-spacing:.02em}
 .candidate-tag:before{content:"";width:8px;height:8px;border-radius:50%;display:inline-block}
 .candidate-card[data-category="closed"]{background:#fcfbf9}
+
+/* 매칭 조건 */
+.match-rules{border:1px solid var(--border);background:#fff;border-radius:4px;padding:18px 22px;margin:14px 0}
+.match-rules h3{font-size:14px;font-weight:600;margin:0 0 10px}
+.rule-checks{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px}
+.rule-checks li{font-size:13px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.rule-checks .mark{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;font-size:11px;font-weight:700;flex:0 0 auto}
+.rule-checks li.ok .mark{background:#e3efe2;color:#2f6d45}
+.rule-checks li.todo .mark{background:#f8e7e2;color:#a04a38}
+.rule-checks li.todo{color:#7a4a40}
+.rule-checks small{font-size:11px}
+.rule-note{font-size:11px;line-height:1.8;margin:12px 0 0}
+@media(max-width:650px){.rule-checks{grid-template-columns:1fr}}

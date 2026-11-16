@@ -37,6 +37,17 @@ def contact_ready(db,grant,strict=True):
     return mutual and meeting
 
 
+def photo_ready(db,grant,strict=True):
+    """프로필 사진은 서로 제공해야 서로 볼 수 있다: 상대도 이 매칭에서 사진 제공에 동의(유효)했는지.
+    요청·승인·다운로드마다 다시 확인하므로 한쪽이 철회하면 다른 쪽 사진도 더 이상 전달되지 않는다."""
+    reverse=db.execute('SELECT * FROM matching_grants WHERE match_id=%s AND owner_id=%s AND recipient_id=%s AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1',
+                       (grant['match_id'],grant['recipient_id'],grant['owner_id'])).fetchone()
+    mutual=bool(reverse) and stamp(plain(reverse)['expires_at'])>now() and 'photo' in json.loads(plain(reverse)['scopes_json'])
+    if strict and not mutual:
+        deny('CONSENT_INVALID','photo_mutual_consent_required','프로필 사진은 두 회원이 모두 사진 제공에 동의해야 서로 볼 수 있습니다.')
+    return mutual
+
+
 def grant_context(db,grant_id):
     raw=db.execute('SELECT * FROM matching_grants WHERE grant_id=%s',(str(grant_id),)).fetchone()
     if not raw:deny('CONSENT_INVALID','matching_grant_missing')
@@ -79,6 +90,7 @@ def check_release(db,row,content,upstream):
         deny('CONSENT_INVALID','matching_release_scope_invalid')
     if not set(scopes)<=set(grant['scopes']):deny('CONSENT_INVALID','matching_release_scope_not_granted')
     if 'contact' in scopes:contact_ready(db,grant)
+    if 'photo' in scopes:photo_ready(db,grant)
     expected={k:grant[k] for k in ('member_id','recipient_id','grant_id','match_id')}
     if any(doc[k]!=v for k,v in expected.items()) or doc['purpose']!='introduction' or any(
             str(row[k])!=grant[k] for k in ('member_id','recipient_id')):
@@ -139,8 +151,10 @@ def register_releases(app,matching,database,counselor,upstream,verified,audit):
                     supported=set(scopes)&SUPPORTED
                     ready=active and 'contact' in supported and contact_ready(db,g,strict=False)
                     if 'contact' in supported and not ready:supported.discard('contact')
+                    photo=active and 'photo' in supported and photo_ready(db,g,strict=False)
+                    if 'photo' in supported and not photo:supported.discard('photo')
                     grants[-1].update(scopes=scopes,active=active,can_prepare=active and owner in assigned,
-                                      supported_scopes=sorted(supported),contact_ready=ready)
+                                      supported_scopes=sorted(supported),contact_ready=ready,photo_ready=photo)
                 item['grants']=grants
                 rows=db.execute('SELECT request_id,consent_id,request_status,expires_at FROM export_requests WHERE purpose=%s AND consent_id IN (SELECT grant_id FROM matching_grants WHERE match_id=%s) ORDER BY created_at DESC',
                                 (PURPOSE,pair['match_id'])).fetchall()
@@ -158,6 +172,7 @@ def register_releases(app,matching,database,counselor,upstream,verified,audit):
                 scopes=sorted(set(body.scopes))
                 if not set(scopes)<=set(grant['scopes']):deny('CONSENT_INVALID','matching_release_scope_not_granted')
                 if 'contact' in scopes:contact_ready(db,grant)
+                if 'photo' in scopes:photo_ready(db,grant)
                 fields=reviewed(upstream,grant,scopes,user['user_id'])
                 doc={k:grant[k] for k in ('member_id','recipient_id','grant_id','match_id')}
                 doc.update(schema_version=3,purpose='introduction',scopes=scopes,fields=fields)

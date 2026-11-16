@@ -160,6 +160,7 @@ def image(data=b'\x89PNG\r\n\x1a\n'+b'0'*32):
 def test_photo_attachment_is_verified_before_release(release_env):
     env,service,pair,_=release_env
     grant=service.share(B,pair['match_id'],Sharing(scopes=['photo'],expires_at=now()+timedelta(hours=1)))
+    service.share(C,pair['match_id'],Sharing(scopes=['photo'],expires_at=now()+timedelta(hours=1)))   # 사진은 서로 제공
     bad=image();bad['sha256']='0'*64
     env['state']['release_attachment']=bad
     r=env['t'].post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['photo']})
@@ -171,3 +172,21 @@ def test_photo_attachment_is_verified_before_release(release_env):
     received=download(release_env,approval.json()).json()
     assert received['fields'][0]['attachments'][0]['media_type']=='image/png'
 
+
+
+def test_profile_photo_requires_mutual_consent_at_every_step(release_env):
+    """프로필 사진은 서로 제공해야 서로 볼 수 있다: 상대 미동의면 요청 불가, 승인 후 상대가 철회하면 다운로드도 차단."""
+    env,service,pair,_=release_env;t=env['t']
+    grant=service.share(B,pair['match_id'],Sharing(scopes=['photo'],expires_at=now()+timedelta(hours=1)))
+    env['state']['release_attachment']=image()
+    r=t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['photo']})
+    assert r.status_code==403 and r.json()['error']['code']=='CONSENT_INVALID'
+    overview=t.get('/api/matching/overview',headers=headers()).json()['items'][0]
+    mine=next(g for g in overview['grants'] if g['owner_id']==B)
+    assert mine['photo_ready'] is False and 'photo' not in mine['supported_scopes']
+    service.share(C,pair['match_id'],Sharing(scopes=['photo','education'],expires_at=now()+timedelta(hours=1)))
+    r=t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['photo']})
+    assert r.status_code==201,r.text
+    approval=t.post(f'/api/export-requests/{r.json()["request_id"]}/approve',headers=headers('APPROVER'),json={}).json()
+    service.share(C,pair['match_id'],Sharing(scopes=['education'],expires_at=now()+timedelta(hours=1)))   # 상대가 사진 제공 철회
+    assert download(release_env,approval).status_code==403

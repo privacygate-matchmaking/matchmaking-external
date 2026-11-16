@@ -47,6 +47,7 @@ class Person(Input):
     job_group: str=Field(min_length=1,max_length=60)
     introduction: str=Field(min_length=1,max_length=300)
     eligible: bool=Field(strict=True)
+    requirements: dict[Literal['identity','education','photo'],bool] | None=None     # 본인 카드만: 매칭 필수 조건 통과 여부
 
 
 class Directory(Input):

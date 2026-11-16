@@ -99,7 +99,7 @@ def register_matching(app,config,database,member,upstream,audit):
             if h:item.update(last_status=h['status'],closed_at=h['closed_at'],retry_at=h['retry_at'])
             (closed if h else fresh).append(item)
         closed.sort(key=lambda x:str(x['closed_at'] or ''))              # 종료·취소된 상대는 맨 뒤 (오래된 순)
-        return {'self':{**public(d.self),'eligible':d.self.eligible},
+        return {'self':{**public(d.self),'eligible':d.self.eligible,'requirements':d.self.requirements},
                 'items':fresh+closed,
                 'data_source':mode,'notice':'합성 회원 실습 모드입니다. 실제 증빙 심사 결과가 아닙니다.' if mode=='synthetic' else None}
 
@@ -174,17 +174,19 @@ def register_matching(app,config,database,member,upstream,audit):
         (counselor request + approver approval); the screen shows it from the member's approved deliveries."""
         context=service.disclosure(user['user_id'],match_id)
         d=directory(request,user);check_peer(d,context)
-        contact_ok=False
-        if 'contact' in context['scopes']:
-            from .matching_release import contact_ready
+        contact_ok=photo_ok=False
+        if {'contact','photo'}&set(context['scopes']):
+            from .matching_release import contact_ready, photo_ready
             from .core import plain
             with service.transaction() as (db,t):
                 grant=db.execute('SELECT * FROM matching_grants WHERE grant_id=%s',(str(context['grant_id']),)).fetchone()
-                contact_ok=bool(grant) and contact_ready(db,plain(grant),strict=False)
+                contact_ok=bool(grant) and 'contact' in context['scopes'] and contact_ready(db,plain(grant),strict=False)
+                photo_ok=bool(grant) and 'photo' in context['scopes'] and photo_ready(db,plain(grant),strict=False)
         record(request,'matching.profile_view',match_id)
         return {'member_id':context['member_id'],'fields':[],'expires_at':context['expires_at'],'data_source':mode,
                 'approval_required':True,'consented_scopes':context['scopes'],
                 'contact_pending':'contact' in context['scopes'] and not contact_ok,
+                'photo_pending':'photo' in context['scopes'] and not photo_ok,     # 상대는 사진 제공, 나는 아직 미제공
                 'release_only_scopes':context['scopes'],'unavailable_scopes':[]}
 
     app.state.matching=service
