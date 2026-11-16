@@ -2,6 +2,8 @@
 // 승인된 소개 자료 보기: 검토 결과 텍스트, 검토된 사진·마스킹 문서 사본, (조건 충족 시) 연락처.
 // 이미지는 형식·문자 집합을 확인한 뒤 data: 주소로만 표시한다 (CSP img-src 'self' data:).
 window.MaterialUI = (() => {
+  // 회원 화면에는 직원용 처리 설명(메타데이터 제거 등)을 빼고 보여 준다. 자료 원문(검토 결과)은 그대로라 다운로드 무결성 확인에 영향 없음
+  const memberText = f => f.scope==='photo' ? String(f.value||'').replace(/\s*\(위치 등 메타데이터 제거\)/,'') : f.value;
   const names = {name:'이름',profile:'공개 소개',education:'학력 확인',employment:'재직 확인',income:'소득 구간',marital_status:'혼인관계',
     property:'부동산',photo:'프로필 사진',documents:'검토·마스킹 문서 사본',contact:'연락처'};
   const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
@@ -18,7 +20,7 @@ window.MaterialUI = (() => {
       panel.replaceChildren(...(only||options.compact?[]:[el('h4','','소개 자료'),el('p','matching-note','상대가 동의하고 담당 직원 요청·승인 담당자 승인을 거친 자료입니다. 원본 증빙이 아니며, 만남 준비 외 용도로 저장·공유하지 마세요.')]));
       for(const f of (doc.fields||[]).filter(f=>!only||(f.attachments||[]).length)) {
         const row=el('div','result-row');
-        row.append(el('strong','',names[f.scope]||f.label),el('p','',f.value),el('span','muted','검토일 '+date(f.reviewed_at)));
+        row.append(el('strong','',names[f.scope]||f.label),el('p','',memberText(f)),el('span','muted','검토일 '+date(f.reviewed_at)));
         for(const a of (f.attachments||[])) {
           if(!safeImage(a))continue;
           const fig=el('figure','material-figure');const img=el('img');img.alt=a.label||'검토된 이미지';img.loading='lazy';
