@@ -68,6 +68,45 @@ window.AccountUI = (() => {
     Object.assign(input, attrs);
     return [l, input];
   }
+  const EVIDENCE_KO = {identity:'신분증 (본인 확인)', education:'졸업증명서 (학력)', employment:'재직증명서', marital:'혼인관계증명서',
+    income:'소득 증빙', property:'부동산 증빙', photo:'프로필 사진'};
+  // 심사 상태 → [표시, 색]. 심사 결과가 있으면 결과가 우선 (원본이 보관 기간 후 삭제돼도 결과는 유지)
+  function evidenceState(item) {
+    if (item.review_result === 'passed') return ['승인', 'ok'];
+    if (item.review_result === 'rejected') return ['반려', 'bad'];
+    if (item.status === 'in_review') return ['심사중', 'wait'];
+    if (item.status === 'submitted') return ['미승인 · 심사 대기', 'wait'];
+    return ['미승인', 'none'];
+  }
+  async function evidenceHistory(api) {
+    const box = el('section', 'form-panel account-section evidence-history');
+    box.append(el('h2', '', '증빙 자료 내역'),
+      el('p', 'muted', '내가 제출한 증빙과 심사 상태입니다. 같은 종류를 다시 제출하면 최신 제출이 위에 표시됩니다. 원본은 심사 후 보관 기간이 지나면 삭제되고 결과만 남습니다.'));
+    let items = [];
+    try { items = (await (await api('/api/me/evidence-files')).json()).items || []; }
+    catch (error) { box.append(el('div', 'error-box', '증빙 내역을 불러오지 못했습니다. ' + error.message)); return box; }
+    if (!items.length) { box.append(el('p', 'muted', '아직 제출한 증빙이 없습니다. "증빙 관리" 탭에서 서류를, 아래 "프로필 사진"에서 사진을 제출할 수 있습니다.')); return box; }
+    items = [...items].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    const seen = new Set();
+    const table = el('table', 'evidence-table');
+    const head = el('tr'); for (const h of ['증빙 종류', '제출일', '상태']) head.append(el('th', '', h));
+    const thead = el('thead'); thead.append(head);
+    const tbody = el('tbody');
+    for (const item of items) {
+      const [label, tone] = evidenceState(item);
+      const tr = el('tr');
+      const kind = el('td', '', EVIDENCE_KO[item.kind] || '증빙');
+      if (seen.has(item.kind)) { tr.className = 'older'; kind.append(el('span', 'muted', ' · 이전 제출')); }
+      seen.add(item.kind);
+      const state = el('td'); state.append(el('span', 'state-pill ' + tone, label));
+      tr.append(kind, el('td', '', new Date(item.created_at).toLocaleDateString('ko-KR', {timeZone: 'Asia/Seoul'})), state);
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    const counts = items.reduce((n, item) => { const [label] = evidenceState(item); n[label] = (n[label] || 0) + 1; return n; }, {});
+    box.append(el('p', 'evidence-summary', Object.entries(counts).map(([k, v]) => `${k} ${v}건`).join(' · ')), table);
+    return box;
+  }
   const photoStatus = {submitted:'접수 · 검토 대기', in_review:'직원 검토 중', passed:'승인됨', rejected:'반려 · 다시 등록해 주세요'};
   async function render(ctx) {
     const {root, api, toast, reload} = ctx;
@@ -83,6 +122,9 @@ window.AccountUI = (() => {
       if (profile.username) who.append(el('p', 'muted', '로그인 아이디 ' + profile.username));
       root.append(who);
     }
+    // 0-1) 증빙 자료 내역: 내가 제출한 서류·사진과 현재 심사 상태 (제출한 것만)
+    root.append(await evidenceHistory(api));
+    if (ctx.isCurrent && !ctx.isCurrent()) return;
     // 1) 비밀번호: 이 서버는 비밀번호를 받지 않고 Keycloak 변경 화면으로 보낸다
     const pw = section('로그인 비밀번호 변경', '비밀번호는 이음 로그인 서비스(Keycloak)에서만 변경합니다. 변경 후 이 화면으로 돌아옵니다.');
     const pwLink = el('a', 'secondary', '비밀번호 변경하기 ↗'); pwLink.href = '/auth/login?action=password';
@@ -94,9 +136,29 @@ window.AccountUI = (() => {
       const latest = profile.photo?.latest;
       ph.append(el('p', '', '현재 상태: ' + (latest ? (photoStatus[latest.status] || latest.status) : '등록된 사진 없음')
         + (profile.photo?.approved_at ? ' · 승인된 사진 있음' : '')));
+      // 미리보기: 승인된 사진 / 검토 중인 사진 (둘 다 위치 등 메타데이터를 지운 사본, 본인만 볼 수 있음)
+      const previews = el('div', 'photo-previews');
+      const thumb = (which, label) => {
+        const fig = el('figure', 'photo-thumb'); const img = el('img');
+        img.alt = label; img.src = `/api/me/profile/photo?which=${which}&t=${Date.now()}`;
+        img.onerror = () => { fig.replaceChildren(el('div', 'photo-empty', which === 'latest' ? '검사 중 · 잠시 후 표시' : '사진 없음'), el('figcaption', '', label)); };
+        fig.append(img, el('figcaption', '', label)); return fig;
+      };
+      if (profile.photo?.approved_at) previews.append(thumb('approved', '승인된 사진 (상대에게 제공되는 사진)'));
+      if (latest && ['submitted', 'in_review'].includes(latest.status)) previews.append(thumb('latest', '검토 중인 새 사진'));
+      if (previews.children.length) ph.append(previews);
       const [pl, pf] = field('사진 파일', 'profile-photo', 'file', null, {accept: 'image/jpeg,image/png', required: true});
+      // 올리기 전 선택한 파일 미리보기 (브라우저 안에서만, 서버로 보내지 않음)
+      const picked = el('figure', 'photo-thumb'); picked.hidden = true;
+      pf.onchange = () => {
+        const file = pf.files[0];
+        if (!file || !['image/jpeg', 'image/png'].includes(file.type) || file.size > 2097152) { picked.hidden = true; return; }
+        const reader = new FileReader();
+        reader.onload = () => { const img = el('img'); img.alt = '선택한 사진'; img.src = reader.result; picked.replaceChildren(img, el('figcaption', '', '선택한 사진 (등록 전 미리보기)')); picked.hidden = false; };
+        reader.readAsDataURL(file);
+      };
       const up = el('button', 'primary', latest ? '사진 변경' : '사진 등록'); up.type = 'submit';
-      const pform = el('form'); pform.append(pl, pf, up);
+      const pform = el('form'); pform.append(pl, pf, picked, up);
       pform.onsubmit = async e => {
         e.preventDefault(); const file = pf.files[0];
         if (!file || file.size > 2097152 || !['image/jpeg','image/png'].includes(file.type)) { toast('2MB 이하의 JPEG·PNG 사진을 선택해 주세요.'); return; }

@@ -130,6 +130,12 @@ def env(tmp_path):
             state.setdefault('notification_calls',[]).append((req.method,req.url.path,req.content.decode() or None))
             if req.method=='GET':return httpx.Response(200,json={'unread':1,'items':[{'notification_id':CONSENT,'kind':'member_match_requested','title':'새 매칭 신청','body':'b','link_view':'matches','created_at':iso(now()),'read':False}]})
             return httpx.Response(200,json={'updated':1,'unread':0})
+        if req.url.path=='/api/internal/my-photo':
+            state['photo_which']=req.url.params.get('which')
+            kind=state.get('photo_kind','jpeg')
+            if kind=='missing':return httpx.Response(404,json={'error':{'code':'NOT_FOUND','message':'표시할 사진이 없습니다.'}})
+            if kind=='html':return httpx.Response(200,content=b'<script>alert(1)</script>',headers={'content-type':'image/jpeg'})
+            return httpx.Response(200,content=b'\xff\xd8\xff\xe0SYNTHETIC-JPEG',headers={'content-type':'image/jpeg'})
         if req.url.path=='/api/internal/my-status':
             if state.get('status_unavailable'):return httpx.Response(501,json={})
             return httpx.Response(200,json=state.get('member_status',{'status':'active','message':None}))
