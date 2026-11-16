@@ -47,6 +47,8 @@ class Person(Input):
     job_group: str=Field(min_length=1,max_length=60)
     introduction: str=Field(min_length=1,max_length=300)
     eligible: bool=Field(strict=True)
+    height_cm: int | None=Field(default=None,ge=100,le=250)      # 본인 신고
+    weight_kg: int | None=Field(default=None,ge=20,le=250)
     requirements: dict[Literal['identity','education','photo'],bool] | None=None     # 본인 카드만: 매칭 필수 조건 통과 여부
 
 
@@ -63,7 +65,7 @@ def months_after(date,months):
 
 def public(person):
     data=person.model_dump(mode='json')
-    return {k:data[k] for k in ('member_id','pseudo_id','age_band','job_group','introduction')}
+    return {k:data.get(k) for k in ('member_id','pseudo_id','age_band','job_group','introduction','height_cm','weight_kg')}
 
 
 def synthetic_directory(user_id):

@@ -51,7 +51,7 @@ window.MatchingUI = (() => {
       c.dataset.category=closed?'closed':'new';
       const tag=el('span','candidate-tag '+(closed?'closed':'new'),closed?'매칭 취소':'새 매칭');
       const top=el('div','candidate-top');top.append(el('div','candidate-avatar',item.pseudo_id.replace('M-','').slice(0,2)),tag);
-      c.append(top,el('h3','',item.pseudo_id),el('div','candidate-meta',`${item.age_band} · ${item.job_group}`),
+      c.append(top,el('h3','',item.pseudo_id),el('div','candidate-meta',[item.age_band,item.height_cm?`${item.height_cm}cm`:null,item.weight_kg?`${item.weight_kg}kg`:null].filter(Boolean).join(' · ')+(item.height_cm||item.weight_kg?' (본인 신고)':'')),
         el('p','candidate-intro',item.introduction),el('p','candidate-note','직원이 소개한 회원입니다. 상세 자료는 매칭 후 공개 동의와 승인을 거쳐 확인합니다.'));
       const b=button('매칭 신청 ↗',async()=>{
         if(!confirm(`${item.pseudo_id}님에게 신청할까요? 매칭권 1개가 예약되고, 수락 시 사용이 확정됩니다.`))return;
