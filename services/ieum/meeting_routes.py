@@ -11,6 +11,17 @@ from .models import Empty
 
 def register_meetings(app,matching,member,counselor,upstream,config,audit):
     meetings=Meetings(matching)
+    from .member_notify import notifier
+    notify=notifier(upstream,audit)
+
+    def state(match_id,proposal_id=None):
+        with matching.transaction() as (db,t):
+            m=db.execute('SELECT sender_id,recipient_id FROM matching_requests WHERE match_id=%s',(str(match_id),)).fetchone()
+            s=db.execute('SELECT status FROM matching_meeting_proposals WHERE proposal_id=%s',(str(proposal_id),)).fetchone() if proposal_id else None
+        return ([str(m['sender_id']),str(m['recipient_id'])] if m else []),(s['status'] if s else None)
+
+    def others(match_id,user_id):
+        return [who for who in state(match_id)[0] if who!=user_id]
 
     def authorization(request,user):
         def check(pair,action):
@@ -56,14 +67,20 @@ def register_meetings(app,matching,member,counselor,upstream,config,audit):
 
     @app.post('/api/matching/requests/{match_id}/meetings/{proposal_id}/confirm')
     def confirm(match_id: UUID,proposal_id: UUID,request: Request,body: Empty=Body(...),user=Depends(counselor)):
+        before=state(match_id,proposal_id)[1]
         result=meetings.confirm(match_id,proposal_id,user['user_id'],authorization(request,user))
         record(request,'meeting.confirm',proposal_id)
+        both,after=state(match_id,proposal_id)
+        if after=='confirmed' and before!='confirmed':notify(request,both,'meeting_confirmed')
         return result
 
     @app.post('/api/matching/requests/{match_id}/meetings/{proposal_id}/cancel')
     def cancel(match_id: UUID,proposal_id: UUID,request: Request,body: Empty=Body(...),user=Depends(counselor)):
+        before=state(match_id,proposal_id)[1]
         result=meetings.cancel(match_id,proposal_id,authorization(request,user))
         record(request,'meeting.cancel',proposal_id)
+        both,after=state(match_id,proposal_id)
+        if after=='cancelled' and before!='cancelled':notify(request,both,'meeting_cancelled')
         return result
 
     @app.get('/api/internal/matching/requests/{match_id}/meetings')
@@ -74,12 +91,14 @@ def register_meetings(app,matching,member,counselor,upstream,config,audit):
     def member_propose(match_id: UUID,body: MeetingOptions,request: Request,user=Depends(member)):
         result=meetings.propose(match_id,user['user_id'],body)
         record(request,'meeting.propose',result['round_id'])
+        notify(request,others(match_id,user['user_id']),'meeting_proposed')
         return result
 
     @app.post('/api/internal/matching/requests/{match_id}/meetings/{proposal_id}/reply')
     def reply(match_id: UUID,proposal_id: UUID,body: Availability,request: Request,user=Depends(member)):
         result=meetings.reply(match_id,proposal_id,user['user_id'],body)
         record(request,'meeting.reply',proposal_id)
+        notify(request,others(match_id,user['user_id']),'meeting_accepted' if body.availability=='available' else 'meeting_change_requested')
         return result
 
     app.state.meetings=meetings

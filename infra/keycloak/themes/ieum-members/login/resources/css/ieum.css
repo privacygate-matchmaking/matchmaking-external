@@ -205,3 +205,6 @@ body::before {
   #kc-page-title { font-size: 24px; }
   body::before { font-size: 10px; }
 }
+/* Header logo links back to the member lounge landing page (template.ftl). */
+a#kc-header-wrapper { text-decoration: none; cursor: pointer; }
+a#kc-header-wrapper:hover { color: var(--ieum-green); }

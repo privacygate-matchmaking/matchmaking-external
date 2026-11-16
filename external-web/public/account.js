@@ -76,6 +76,13 @@ window.AccountUI = (() => {
     catch (error) { root.append(el('div', 'error-box', '내 정보를 불러오지 못했습니다. ' + error.message)); }
     if (ctx.isCurrent && !ctx.isCurrent()) return;
 
+    // 0) 로그인한 계정 (본인 이름·아이디)
+    if (profile && profile.name) {
+      const who = el('section', 'form-panel account-section account-who');
+      who.append(el('span', 'eyebrow', 'MY ACCOUNT'), el('h2', '', profile.name + ' 님'));
+      if (profile.username) who.append(el('p', 'muted', '로그인 아이디 ' + profile.username));
+      root.append(who);
+    }
     // 1) 비밀번호: 이 서버는 비밀번호를 받지 않고 Keycloak 변경 화면으로 보낸다
     const pw = section('로그인 비밀번호 변경', '비밀번호는 이음 로그인 서비스(Keycloak)에서만 변경합니다. 변경 후 이 화면으로 돌아옵니다.');
     const pwLink = el('a', 'secondary', '비밀번호 변경하기 ↗'); pwLink.href = '/auth/login?action=password';

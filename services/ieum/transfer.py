@@ -140,6 +140,9 @@ def create_app(config=None, identity=None, database=None, internal=None):
             deny(code,'internal_request_failed',message)
         return result
 
+    from .member_notify import notifier
+    notify=notifier(upstream,audit)
+
     def disclosure(row):
         fields={k:str(row[k]) for k in ('member_id','recipient_id','consent_id','purpose')}
         result=upstream('POST','/api/internal/disclosure-checks',json={**fields,'item':'profile'}).json()
@@ -291,6 +294,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
         result={'request_id':str(request_id),'request_status':status}
         if approve:
             result.update(approval_id=approval_id,delivery_id=delivery_id,expires_at=item['expires_at'])
+            notify(request,[item['recipient_id']],'release_approved')
         return result
 
     @app.post('/api/export-requests/{request_id}/approve')
@@ -305,12 +309,13 @@ def create_app(config=None, identity=None, database=None, internal=None):
     def revoke(approval_id: UUID,request: Request,body: Empty=Body(...),user=Depends(role('approver'))):
         require_role(user,('approver',))
         with database.connection() as db:
-            row=db.execute('SELECT request_id FROM approvals WHERE approval_id=%s',(str(approval_id),)).fetchone()
+            row=db.execute('SELECT a.request_id,a.revoked_at,r.recipient_id FROM approvals a JOIN export_requests r ON r.request_id=a.request_id WHERE a.approval_id=%s',(str(approval_id),)).fetchone()
             if not row:
                 deny('NOT_FOUND','approval_missing')
             db.execute('UPDATE approvals SET revoked_at=%s WHERE approval_id=%s',(now(),str(approval_id)))
             db.execute("UPDATE export_requests SET request_status='revoked' WHERE request_id=%s",(row['request_id'],))
         audit.record(request,'release.revoke')
+        if not row['revoked_at']:notify(request,[str(row['recipient_id'])],'release_revoked')
         return {'approval_id':str(approval_id),'request_status':'revoked','revoked_at':iso(now())}
 
     JOIN='''SELECT r.*, a.approval_id,a.approved_file_id,a.approved_file_version,a.approved_file_hash,
@@ -416,6 +421,10 @@ def create_app(config=None, identity=None, database=None, internal=None):
     register_releases(app,app.state.matching,database,role('counselor'),upstream,verified,audit)
     from .member_account import register_account_relay
     register_account_relay(app,member,upstream,audit,lambda:config['member_status_check'])
+    from .member_signup import register_signup_relay
+    register_signup_relay(app,identity,upstream,audit)
+    from .member_notify import register_notification_relay
+    register_notification_relay(app,member,upstream)
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)
     app.state.database,app.state.staff,app.state.member=database,staff,member

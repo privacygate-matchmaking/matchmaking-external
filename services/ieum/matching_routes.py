@@ -55,6 +55,13 @@ def register_matching(app,config,database,member,upstream,audit):
     mode=config.get('matching_directory_mode','internal')
     if mode not in ('internal','synthetic'):raise RuntimeError('Invalid MATCHING_DIRECTORY_MODE')
     service=Matching(database,test_payments=config.get('test_payments',False))
+    from .member_notify import notifier
+    notify=notifier(upstream,audit)
+
+    def pair(match_id):
+        with service.transaction() as (db,t):
+            row=db.execute('SELECT sender_id,recipient_id,status FROM matching_requests WHERE match_id=%s',(str(match_id),)).fetchone()
+        return {k:str(row[k]) for k in ('sender_id','recipient_id','status')} if row else None
 
     def directory(request,user):
         if mode=='synthetic':result=synthetic_directory(user['user_id'])
@@ -110,6 +117,9 @@ def register_matching(app,config,database,member,upstream,audit):
     def propose(body: Proposal,request: Request,user=Depends(member)):
         result=service.propose(user['user_id'],directory(request,user),body)
         record(request,'matching.request',result['match_id'])
+        p=pair(result['match_id'])
+        if p and p['status']=='pending' and p['sender_id']==user['user_id']:
+            notify(request,[p['recipient_id']],'match_requested')
         return result
 
     @app.post('/api/internal/matching/requests/{match_id}/decision')
@@ -121,8 +131,13 @@ def register_matching(app,config,database,member,upstream,audit):
                 item=service.owned(db,match_id,user['user_id'])
                 if not any(str(p.user_id)==item['sender_id'] and p.eligible for p in d.items):
                     deny('ACCESS_DENIED','peer_not_eligible')
+        before=pair(match_id)
         result=service.decide(user['user_id'],match_id,body.action)
         record(request,'matching.'+body.action,match_id)
+        after=pair(match_id)
+        if before and after and before['status']!=after['status']:
+            other=after['sender_id'] if user['user_id']==after['recipient_id'] else after['recipient_id']
+            notify(request,[other],{'accept':'match_accepted','reject':'match_rejected','cancel':'match_cancelled','end':'match_ended'}[body.action])
         return result
 
     @app.get('/api/internal/matching/requests/{match_id}/sharing')

@@ -228,6 +228,10 @@ def create_app(config=None, identity=None, upstream=None):
     register_matching_bff(app,current,relay,audit)
     from .member_account import register_account_bff
     register_account_bff(app,current,relay,audit)
+    from .member_notify import register_notification_bff
+    register_notification_bff(app,current,relay)
+    from .member_signup import register_signup_bff
+    register_signup_bff(app,config,identity,upstream,audit,config.get('signup_limiter'))
     setattr(current,'__privacygate_policy__','roles:member')
     from privacygate.web import assert_all_routes_guarded
     assert_all_routes_guarded(app)

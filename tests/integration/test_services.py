@@ -116,8 +116,20 @@ def env(tmp_path):
             return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
               {'scope':'employment','label':'재직','value':'합성 연구직','review_status':'reviewed','reviewed_at':iso(now())},
               {'scope':'contact','label':'연락처','value':'SYNTHETIC-CONTACT','review_status':'reviewed','reviewed_at':iso(now())}]})
+        if req.url.path=='/api/internal/member-notification-events':
+            if state.get('events_fail'):return httpx.Response(500,json={'error':{'code':'INTERNAL_ERROR'}})
+            state.setdefault('events',[]).append({**json.loads(req.content),'user_token':req.headers.get('X-User-Token')})
+            return httpx.Response(200,json={'created':1})
+        if req.url.path=='/api/internal/member-signups':
+            state.setdefault('signups',[]).append({'body':json.loads(req.content),'user_token':req.headers.get('X-User-Token')})
+            if state.get('signup_error'):return httpx.Response(state['signup_error'][0],json={'error':state['signup_error'][1]})
+            return httpx.Response(201,json={'status':'registered','username':json.loads(req.content)['username']})
         if req.headers.get('X-User-Token')!='MEMBER':
             return httpx.Response(403,json={'error':{'code':'ACCESS_DENIED'}})
+        if req.url.path.startswith('/api/internal/my-notifications'):
+            state.setdefault('notification_calls',[]).append((req.method,req.url.path,req.content.decode() or None))
+            if req.method=='GET':return httpx.Response(200,json={'unread':1,'items':[{'notification_id':CONSENT,'kind':'member_match_requested','title':'새 매칭 신청','body':'b','link_view':'matches','created_at':iso(now()),'read':False}]})
+            return httpx.Response(200,json={'updated':1,'unread':0})
         if req.url.path=='/api/internal/my-status':
             if state.get('status_unavailable'):return httpx.Response(501,json={})
             return httpx.Response(200,json=state.get('member_status',{'status':'active','message':None}))

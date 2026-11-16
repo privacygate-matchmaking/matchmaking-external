@@ -22,6 +22,25 @@
 | POST /api/me/consents | 동의 모델 | 내부 생성 응답, 201 |
 | POST /api/me/consents/{consent_id}/revoke | {} | 내부 철회 응답 |
 
+## 회원 알림
+
+| 메서드·경로 | 호출자 | 입력 / 응답 |
+|---|---|---|
+| GET /api/me/notifications | member (세션) | {unread, items:[{notification_id, kind, title, body, link_view, created_at, read}]} |
+| POST /api/me/notifications/read · /delete | member (세션 + CSRF) | {ids:[UUID], all:false} → {updated\|deleted, unread} |
+| GET·POST /api/internal/member-notifications(/read, /delete) (transfer-api) | external-api 서비스 토큰 + 회원 토큰 | internal-api /api/internal/my-notifications 로 전달 |
+
+알림 문구는 internal-api 가 정합니다. transfer-api 는 매칭·일정·공개 승인 사건이 생기면 사건 종류와 대상 회원 id만 internal-api `POST /api/internal/member-notification-events` 로 보내며, 실패해도 업무 응답에는 영향이 없습니다.
+
+## 회원가입 (로그인 전)
+
+| 메서드·경로 | 호출자 | 입력 / 응답 |
+|---|---|---|
+| POST /api/signup (external-api) | 브라우저, 세션 없음. Origin 일치 필수, 접속 주소당 10분 5회·전체 60회 | 가입 모델 → {status:"registered"} (201) |
+| POST /api/internal/member-signups (transfer-api) | external-api 서비스 토큰만 (X-User-Token 없음) | 가입 모델 → internal-api 같은 경로로 전달 |
+
+가입 모델: username(영문 소문자 시작 4~20자, a-z0-9_), password(12~64자, 아이디 포함 불가), name, gender(남/여), birth_date(만 19세 이상), contact_phone, contact_email, education_level(고졸/전문대졸/4년제 대졸/대학원졸), job_group(40자), height_cm(120~230), weight_kg(30~200), introduction(300자) — 모두 필수, privacy_consent(true), consent_version("2026-11"). 계정 생성·회원 저장·담당 배정은 internal-api가 합니다. 비밀번호는 감사 로그·응답에 남기지 않습니다. 중복 아이디·이메일은 409 INVALID_STATE.
+
 동의 모델: counterpart_member_id(UUID), item(profile/photo/contact), purpose(introduction), expires_at(미래 시각). 회원 본인 ID는 입력받지 않고 서버의 검증된 토큰으로 결정합니다.
 
 제공 건: delivery_id, approval_id, file_id(승인 파일), file_version, purpose, request_status, expires_at, downloaded_at, download_url. ID가 보인다고 다른 회원 건에 접근할 수 있는 것은 아닙니다.
