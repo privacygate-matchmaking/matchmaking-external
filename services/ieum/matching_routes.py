@@ -89,8 +89,18 @@ def register_matching(app,config,database,member,upstream,audit):
     @app.get('/api/internal/matching/candidates')
     def candidates(request: Request,user=Depends(member)):
         d=directory(request,user)
+        peers=[p for p in d.items if p.eligible]
+        history=service.pair_history(user['user_id'],[str(p.user_id) for p in peers])
+        fresh,closed=[],[]
+        for p in peers:
+            h=history.get(str(p.user_id))
+            if h and h['status'] in ('pending','matched'):continue      # 진행 중·성사된 상대는 후보에서 뺀다
+            item={**public(p),'category':'closed' if h else 'new'}
+            if h:item.update(last_status=h['status'],closed_at=h['closed_at'],retry_at=h['retry_at'])
+            (closed if h else fresh).append(item)
+        closed.sort(key=lambda x:str(x['closed_at'] or ''))              # 종료·취소된 상대는 맨 뒤 (오래된 순)
         return {'self':{**public(d.self),'eligible':d.self.eligible},
-                'items':[public(p) for p in d.items if p.eligible],
+                'items':fresh+closed,
                 'data_source':mode,'notice':'합성 회원 실습 모드입니다. 실제 증빙 심사 결과가 아닙니다.' if mode=='synthetic' else None}
 
     @app.get('/api/internal/matching/membership')

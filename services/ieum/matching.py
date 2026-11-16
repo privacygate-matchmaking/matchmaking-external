@@ -188,6 +188,37 @@ class Matching:
             self.event(db,row,'reserve',t)
             return self.serialize(db,row,user_id)
 
+    def pair_history(self,user_id,peer_ids):
+        """후보별 가장 최근 신청 상태. 진행 중(pending·matched)이면 후보에서 빼고,
+        종료·거절·취소·만료면 '매칭 취소' 후보로 맨 뒤에 다시 보여 준다."""
+        out={}
+        with self.transaction() as (db,t):
+            for peer in peer_ids:
+                pair=':'.join(sorted((user_id,peer)))
+                row=db.execute('SELECT status,decided_at,ended_at,created_at FROM matching_requests WHERE pair_key=%s ORDER BY created_at DESC LIMIT 1',(pair,)).fetchone()
+                if not row:continue
+                row=plain(row)
+                when=row.get('ended_at') or row.get('decided_at') or row['created_at']
+                retry=None
+                if row['status']=='rejected' and row.get('decided_at'):
+                    until=stamp(row['decided_at'])+timedelta(days=30)
+                    if until>t:retry=iso(until)
+                out[peer]={'status':row['status'],'closed_at':when,'retry_at':retry}
+        return out
+
+    def staff_end(self,match_id,authorize):
+        """담당 직원의 관계 종료: 성사된 매칭만, 공개 동의는 모두 철회된다 (매칭권은 사용 확정 그대로)."""
+        with self.transaction() as (db,t):
+            row=db.execute('SELECT * FROM matching_requests WHERE match_id=%s',(str(match_id),)).fetchone()
+            if not row:deny('NOT_FOUND','match_missing')
+            row=plain(row);authorize(row,'end')
+            if row['status']=='ended':return {'match_id':str(match_id),'status':'ended'}
+            if row['status']!='matched':deny('INVALID_STATE','match_transition_invalid','성사된 매칭만 종료할 수 있습니다.')
+            db.execute("UPDATE matching_requests SET status='ended',decided_at=%s,ended_at=%s WHERE match_id=%s",(t,t,str(match_id)))
+            db.execute('UPDATE matching_grants SET revoked_at=%s WHERE match_id=%s AND revoked_at IS NULL',(t,str(match_id)))
+            db.execute("UPDATE matching_meeting_proposals SET status='cancelled' WHERE match_id=%s AND status IN ('proposed','confirmed')",(str(match_id),))
+            return {'match_id':str(match_id),'status':'ended','sender_id':row['sender_id'],'recipient_id':row['recipient_id']}
+
     def owned(self,db,match_id,user_id):
         row=db.execute('SELECT * FROM matching_requests WHERE match_id=%s AND (sender_id=%s OR recipient_id=%s)',(str(match_id),user_id,user_id)).fetchone()
         if not row:deny('NOT_FOUND','match_missing')

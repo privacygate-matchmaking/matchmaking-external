@@ -18,7 +18,7 @@ from pydantic import Field
 
 from .models import Strict
 
-Kind = Literal['match_requested','match_accepted','match_rejected','match_cancelled','match_ended',
+Kind = Literal['match_requested','match_accepted','match_rejected','match_cancelled','match_ended','match_ended_by_staff',
                'meeting_proposed','meeting_accepted','meeting_change_requested','meeting_confirmed','meeting_cancelled',
                'release_approved','release_revoked']
 

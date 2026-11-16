@@ -52,3 +52,15 @@
 .candidate-strip{position:relative;display:flex;align-items:center;gap:8px}.candidate-strip .candidate-grid{display:flex;grid-template-columns:none;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;padding:4px 2px 14px;flex:1;min-width:0;scrollbar-width:thin}.candidate-strip .candidate-card{flex:0 0 min(300px,82vw);scroll-snap-align:start}.candidate-scroll{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:1px solid var(--border);background:#fff;color:var(--green);font-size:20px;line-height:1}.candidate-scroll:disabled{opacity:.3;cursor:default}.candidate-count{font-size:12px;margin:14px 0 8px}
 @media(max-width:650px){.candidate-scroll{display:none}}
 .document-list{grid-template-columns:minmax(0,1fr)}.candidate-strip{width:100%;min-width:0}
+/* 소개 후보 분류: 전체 · 새 매칭 · 매칭 취소 */
+.candidate-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:14px 0 8px}.candidate-head .candidate-count{margin:0}
+.candidate-filters{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+.candidate-filter{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;color:#4f5b55;border-radius:20px;padding:5px 12px;font-size:12px}
+.candidate-filter .dot{width:8px;height:8px;border-radius:50%;background:#9aa49d;display:inline-block}
+.candidate-filter.new .dot,.candidate-tag.new:before{background:#3f8a5a}
+.candidate-filter.closed .dot,.candidate-tag.closed:before{background:#b2685a}
+.candidate-filter.all .dot{background:var(--green)}
+.candidate-filter.active{border-color:var(--green);color:var(--green);font-weight:600;background:#f1f4ec}
+.candidate-tag{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#4f5b55;letter-spacing:.02em}
+.candidate-tag:before{content:"";width:8px;height:8px;border-radius:50%;display:inline-block}
+.candidate-card[data-category="closed"]{background:#fcfbf9}

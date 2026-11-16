@@ -83,6 +83,15 @@ def register_meetings(app,matching,member,counselor,upstream,config,audit):
         if after=='cancelled' and before!='cancelled':notify(request,both,'meeting_cancelled')
         return result
 
+    @app.post('/api/matching/requests/{match_id}/end')
+    def staff_end(match_id: UUID,request: Request,body: Empty=Body(...),user=Depends(counselor)):
+        """담당 직원(두 회원 중 한쪽 담당이면 가능)의 관계 종료. 두 회원 모두에게 알린다."""
+        result=matching.staff_end(match_id,authorization(request,user))
+        audit.record(request,'matching.staff_end',target=str(match_id),target_type='match')
+        both=[result.pop(k) for k in ('sender_id','recipient_id') if k in result]
+        if both:notify(request,both,'match_ended_by_staff')
+        return result
+
     @app.get('/api/internal/matching/requests/{match_id}/meetings')
     def member_list(match_id: UUID,request: Request,user=Depends(member)):
         return meetings.list(match_id,user['user_id'])

@@ -85,6 +85,8 @@ GET /health는 로그인 없이 프로세스 생존 상태만 반환하며 의�
 ## 명시적 매칭 동의 기반 자료 제공
 
 - 직원 GET `/api/matching/overview`: 내부 상담 BFF에서 중계 조회. 매칭 ID·양쪽 user UUID·상태·최근 방향별 동의와 새 반출 상태를 반환. 내부 BFF는 담당 회원 코드/이름, 비담당 상대의 최소 설명으로 표시.
+- 회원 GET `/api/me/candidates` 항목에 `category`(`new` 새 매칭 · `closed` 매칭 취소)를 추가. 진행 중(`pending`)·성사(`matched`)인 상대는 빠지고, 마지막 신청이 종료·거절·취소·만료인 상대는 `closed` 로 맨 뒤(오래된 순)에 `last_status`, `closed_at`, `retry_at`(거절 후 30일 재신청 제한 끝나는 시각, 없으면 null)과 함께 온다.
+- 직원 POST `/api/matching/requests/{match_id}/end` `{}`: 담당 상담 직원(두 회원 중 한쪽 담당이면 가능)의 관계 종료. 내부 `matching-staff-checks`(action `end`)로 범위 확인, 성사(`matched`)만 가능(아니면 409), 공개 동의 철회·만남 일정 취소, 두 회원에게 `match_ended_by_staff` 알림. 200 `{match_id, status:"ended"}`. 감사 `matching.staff_end`. 내부 BFF 같은 경로(CSRF).
 - 직원 GET `/api/matching/members/{user_id}/membership`(중계, 내부 internal-api 가 직원 토큰을 X-User-Token 으로 함께 보냄): counselor·data_admin 만. 먼저 내부 `POST /api/internal/member-scope-checks` 로 담당 범위를 확인하고, 아니면 403 `member_not_in_scope`. 200: `{paid, plan:{name,credits,months}, wallet:{active,total,reserved,used,available,expires_at}, last_paid_at, orders:[{plan_code, amount_won, status, created_at, paid_at}]}` (주문 번호·결제 정보 없음). 감사 `matching.membership_view`.
 - 내부 BFF GET `/api/matching/overview?member_id=<업무 UUID>`: 현재 담당 범위를 확인한 뒤 해당 회원의 항목만 반환.
 - 직원 POST `/api/matching/releases`: `{ "grant_id": "UUID", "scopes": ["education"] }`. 201: request_id, file_id, consent_id, request_status=pending. 내부 BFF는 CSRF와 Origin 필수. profile/education/employment 중 동의된 항목만 선택 가능.

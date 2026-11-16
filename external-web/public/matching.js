@@ -41,11 +41,16 @@ window.MatchingUI = (() => {
     band.append(el('div','',w.active?`사용 가능 ${w.available}개 · 예약 ${w.reserved}개 · 사용 ${w.used}개`:'현재 일반회원입니다.'),
       el('span','muted',w.active?'이용 기한 '+date(w.expires_at):'신청은 정회원 이용권이 필요합니다. 받은 신청에는 응답할 수 있습니다.'));
     root.append(band);
-    if(!data.items.length){root.append(empty('현재 소개 가능한 후보가 없습니다.'));return;}
+    if(!data.items.length){root.append(empty('현재 소개 가능한 후보가 없습니다. 진행 중이거나 성사된 상대는 매칭 현황에서 확인하세요.'));return;}
     const grid=el('div','candidate-grid');grid.tabIndex=0;grid.setAttribute('aria-label','소개 후보 (옆으로 넘겨 보기)');
+    const cards=[];
+    const lastText={ended:'이전 매칭이 종료된 상대입니다.',rejected:'이전 신청이 거절된 상대입니다.',cancelled:'이전 신청을 취소한 상대입니다.',expired:'이전 신청이 응답 기한을 넘긴 상대입니다.'};
     for(const item of data.items) {
       const c=el('article','candidate-card');
-      const top=el('div','candidate-top');top.append(el('div','candidate-avatar',item.pseudo_id.replace('M-','').slice(0,2)),el('span','eyebrow','A NEW CONNECTION'));
+      const closed=item.category==='closed';
+      c.dataset.category=closed?'closed':'new';
+      const tag=el('span','candidate-tag '+(closed?'closed':'new'),closed?'매칭 취소':'새 매칭');
+      const top=el('div','candidate-top');top.append(el('div','candidate-avatar',item.pseudo_id.replace('M-','').slice(0,2)),tag);
       c.append(top,el('h3','',item.pseudo_id),el('div','candidate-meta',`${item.age_band} · ${item.job_group}`),el('p','',item.introduction));
       const b=button('매칭 신청 ↗',async()=>{
         if(!confirm(`${item.pseudo_id}님에게 신청할까요? 매칭권 1개가 예약되고, 수락 시 사용이 확정됩니다.`))return;
@@ -54,9 +59,26 @@ window.MatchingUI = (() => {
           toast('신청했습니다. 상대의 응답을 기다려주세요.');await reload();
         }catch(e){toast(e.message);}
       },true);
-      b.disabled=!w.active||w.available<1||!data.self.eligible;
+      b.disabled=!w.active||w.available<1||!data.self.eligible||Boolean(item.retry_at);
+      if(closed)c.append(note((lastText[item.last_status]||'이전 매칭 기록이 있는 상대입니다.')+(item.retry_at?` ${date(item.retry_at)} 이후 다시 신청할 수 있습니다.`:' 다시 신청할 수 있습니다.')));
       if(!data.self.eligible)c.append(note('회원 검토가 완료된 후 신청할 수 있습니다.'));
-      c.append(b);grid.append(c);
+      c.append(b);cards.push(c);
+    }
+    // 분류: 전체 · 새 매칭 · 매칭 취소 (종료·거절·취소·만료된 상대는 서버가 맨 뒤로 보낸다)
+    const counts={all:cards.length,new:cards.filter(c=>c.dataset.category==='new').length};counts.closed=counts.all-counts.new;
+    const filters=el('div','candidate-filters');filters.setAttribute('role','group');filters.setAttribute('aria-label','후보 분류');
+    const countLine=el('p','candidate-count muted');
+    const show=kind=>{
+      const list=kind==='all'?cards:cards.filter(c=>c.dataset.category===kind);
+      grid.replaceChildren(...list);grid.scrollLeft=0;
+      for(const f of filters.children){const on=f.dataset.kind===kind;f.classList.toggle('active',on);f.setAttribute('aria-pressed',String(on));}
+      countLine.textContent=list.length?`후보 ${list.length}명 · 옆으로 넘겨 보세요`:'이 분류에 해당하는 후보가 없습니다.';
+      requestAnimationFrame(edges);
+    };
+    for(const [kind,label] of [['all','전체'],['new','새 매칭'],['closed','매칭 취소']]) {
+      const f=el('button','candidate-filter '+kind);f.type='button';f.dataset.kind=kind;
+      f.append(el('span','dot'),document.createTextNode(` ${label} ${counts[kind]}`));
+      f.onclick=()=>show(kind);filters.append(f);
     }
     const strip=el('div','candidate-strip');
     const prev=el('button','candidate-scroll prev','‹'),next=el('button','candidate-scroll next','›');
@@ -66,8 +88,9 @@ window.MatchingUI = (() => {
     const edges=()=>{prev.disabled=grid.scrollLeft<=4;next.disabled=grid.scrollLeft+grid.clientWidth>=grid.scrollWidth-4;};
     grid.addEventListener('scroll',edges,{passive:true});
     strip.append(prev,grid,next);
-    root.append(el('p','candidate-count muted',`후보 ${data.items.length}명 · 옆으로 넘겨 보세요`),strip);
-    requestAnimationFrame(edges);
+    const head=el('div','candidate-head');head.append(countLine,filters);
+    root.append(head,strip);
+    show('all');
     root.append(note('하루 신규 신청 3건 · 동시 대기 3건 · 응답 기한 72시간. 거절된 상대에게는 30일간 재신청할 수 없습니다.'));
   }
   function matches(data,ctx) {
