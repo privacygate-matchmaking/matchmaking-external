@@ -42,7 +42,7 @@ window.MatchingUI = (() => {
       el('span','muted',w.active?'이용 기한 '+date(w.expires_at):'신청은 정회원 이용권이 필요합니다. 받은 신청에는 응답할 수 있습니다.'));
     root.append(band);
     if(!data.items.length){root.append(empty('현재 소개 가능한 후보가 없습니다.'));return;}
-    const grid=el('div','candidate-grid');
+    const grid=el('div','candidate-grid');grid.tabIndex=0;grid.setAttribute('aria-label','소개 후보 (옆으로 넘겨 보기)');
     for(const item of data.items) {
       const c=el('article','candidate-card');
       const top=el('div','candidate-top');top.append(el('div','candidate-avatar',item.pseudo_id.replace('M-','').slice(0,2)),el('span','eyebrow','A NEW CONNECTION'));
@@ -58,12 +58,23 @@ window.MatchingUI = (() => {
       if(!data.self.eligible)c.append(note('회원 검토가 완료된 후 신청할 수 있습니다.'));
       c.append(b);grid.append(c);
     }
-    root.append(grid,note('하루 신규 신청 3건 · 동시 대기 3건 · 응답 기한 72시간. 거절된 상대에게는 30일간 재신청할 수 없습니다.'));
+    const strip=el('div','candidate-strip');
+    const prev=el('button','candidate-scroll prev','‹'),next=el('button','candidate-scroll next','›');
+    prev.type=next.type='button';prev.setAttribute('aria-label','이전 후보');next.setAttribute('aria-label','다음 후보');
+    const step=dir=>grid.scrollBy({left:dir*(grid.clientWidth*0.9),behavior:'smooth'});
+    prev.onclick=()=>step(-1);next.onclick=()=>step(1);
+    const edges=()=>{prev.disabled=grid.scrollLeft<=4;next.disabled=grid.scrollLeft+grid.clientWidth>=grid.scrollWidth-4;};
+    grid.addEventListener('scroll',edges,{passive:true});
+    strip.append(prev,grid,next);
+    root.append(el('p','candidate-count muted',`후보 ${data.items.length}명 · 옆으로 넘겨 보세요`),strip);
+    requestAnimationFrame(edges);
+    root.append(note('하루 신규 신청 3건 · 동시 대기 3건 · 응답 기한 72시간. 거절된 상대에게는 30일간 재신청할 수 없습니다.'));
   }
   function matches(data,ctx) {
     const {root}=ctx;
     root.append(title('우리의 매칭 현황','수락은 관계의 시작입니다. 정보 공개는 각자가 항목과 기한을 선택한 뒤 가능합니다.'));
     if(!data.items.length){root.append(empty('아직 주고받은 매칭 신청이 없습니다.'));return;}
+    const cards=[];
     for(const item of data.items){
       const c=el('article','match-card');const top=el('div','card-top');
       top.append(el('h3','',item.peer.pseudo_id),el('span','badge'+(item.status==='matched'?'':' inactive'),states[item.status]||item.status));
@@ -85,8 +96,10 @@ window.MatchingUI = (() => {
         actions.append(button('상대가 허용한 정보 보기',async()=>{await peer(item,detail,ctx);}));
         action('관계 종료','end');
       }
-      c.append(actions,detail);root.append(c);
+      c.append(actions,detail);cards.push(c);
     }
+    const box=el('div','paged-list');root.append(box);
+    if(window.Pager)Pager.mount(box,cards,7,{label:'매칭 현황 페이지'});else box.append(...cards);
   }
   async function sharing(item,panel,ctx){
     panel.hidden=false;panel.replaceChildren(el('p','muted','공개 설정을 불러오고 있습니다…'));

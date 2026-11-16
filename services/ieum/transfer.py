@@ -419,6 +419,21 @@ def create_app(config=None, identity=None, database=None, internal=None):
     from .meeting_routes import register_meetings
     register_meetings(app,app.state.matching,member,role('counselor'),upstream,config,audit)
     register_releases(app,app.state.matching,database,role('counselor'),upstream,verified,audit)
+
+    # 담당 회원 상세(내부 직원 화면)용 이용권 정보: 정회원 여부·남은 매칭권·구매일. 범위는 internal-api 가 다시 확인
+    @app.get('/api/matching/members/{user_id}/membership')
+    def member_membership(user_id: UUID,request: Request,user=Depends(role('counselor','data_admin'))):
+        request.state.user_token=bearer(request)
+        check=upstream('POST','/api/internal/member-scope-checks',request,json={'user_id':str(user_id)}).json()
+        if not isinstance(check,dict) or check.get('allowed') is not True:
+            deny('ACCESS_DENIED','member_not_in_scope')
+        data=app.state.matching.membership(str(user_id))
+        paid=[o for o in data['orders'] if o['status']=='paid']
+        audit.record(request,'matching.membership_view')
+        return {'paid':bool(data['wallet']['active']),'wallet':data['wallet'],
+            'plan':{k:data['plan'][k] for k in ('name','credits','months')},
+                'last_paid_at':(paid[0].get('paid_at') or paid[0]['created_at']) if paid else None,
+                'orders':[{k:o.get(k) for k in ('plan_code','amount_won','status','created_at','paid_at')} for o in data['orders']]}
     from .member_account import register_account_relay
     register_account_relay(app,member,upstream,audit,lambda:config['member_status_check'])
     from .member_signup import register_signup_relay

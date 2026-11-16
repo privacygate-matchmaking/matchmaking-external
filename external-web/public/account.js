@@ -102,9 +102,12 @@ window.AccountUI = (() => {
       tr.append(kind, el('td', '', new Date(item.created_at).toLocaleDateString('ko-KR', {timeZone: 'Asia/Seoul'})), state);
       tbody.append(tr);
     }
+    const rows = [...tbody.children];
     table.append(thead, tbody);
     const counts = items.reduce((n, item) => { const [label] = evidenceState(item); n[label] = (n[label] || 0) + 1; return n; }, {});
-    box.append(el('p', 'evidence-summary', Object.entries(counts).map(([k, v]) => `${k} ${v}건`).join(' · ')), table);
+    const nav = el('nav', 'pager');
+    box.append(el('p', 'evidence-summary', Object.entries(counts).map(([k, v]) => `${k} ${v}건`).join(' · ')), table, nav);
+    if (window.Pager) Pager.mount(tbody, rows, 7, {nav, label: '증빙 자료 내역 페이지'});
     return box;
   }
   const photoStatus = {submitted:'접수 · 검토 대기', in_review:'직원 검토 중', passed:'승인됨', rejected:'반려 · 다시 등록해 주세요'};

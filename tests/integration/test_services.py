@@ -100,6 +100,9 @@ def env(tmp_path):
         if req.url.path=='/api/internal/disclosure-checks':
             return httpx.Response(200,json={'allowed':state['allowed'],'expires_at':state['consent_expires'],
               'member_id':state.get('disclosure_member_id',M)})
+        if req.url.path=='/api/internal/member-scope-checks':
+            state.setdefault('scope_checks',[]).append((json.loads(req.content),req.headers.get('X-User-Token')))
+            return httpx.Response(200,json={'allowed':req.headers.get('X-User-Token') in state.get('scope_allowed_tokens',('COUNSELOR','ADMIN'))})
         if req.url.path=='/api/internal/matching-staff-checks':
             if state.get('staff_scope_unavailable'):return httpx.Response(501,json={})
             state['staff_scope_body']=json.loads(req.content)

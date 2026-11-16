@@ -85,6 +85,7 @@ GET /health는 로그인 없이 프로세스 생존 상태만 반환하며 의�
 ## 명시적 매칭 동의 기반 자료 제공
 
 - 직원 GET `/api/matching/overview`: 내부 상담 BFF에서 중계 조회. 매칭 ID·양쪽 user UUID·상태·최근 방향별 동의와 새 반출 상태를 반환. 내부 BFF는 담당 회원 코드/이름, 비담당 상대의 최소 설명으로 표시.
+- 직원 GET `/api/matching/members/{user_id}/membership`(중계, 내부 internal-api 가 직원 토큰을 X-User-Token 으로 함께 보냄): counselor·data_admin 만. 먼저 내부 `POST /api/internal/member-scope-checks` 로 담당 범위를 확인하고, 아니면 403 `member_not_in_scope`. 200: `{paid, plan:{name,credits,months}, wallet:{active,total,reserved,used,available,expires_at}, last_paid_at, orders:[{plan_code, amount_won, status, created_at, paid_at}]}` (주문 번호·결제 정보 없음). 감사 `matching.membership_view`.
 - 내부 BFF GET `/api/matching/overview?member_id=<업무 UUID>`: 현재 담당 범위를 확인한 뒤 해당 회원의 항목만 반환.
 - 직원 POST `/api/matching/releases`: `{ "grant_id": "UUID", "scopes": ["education"] }`. 201: request_id, file_id, consent_id, request_status=pending. 내부 BFF는 CSRF와 Origin 필수. profile/education/employment 중 동의된 항목만 선택 가능.
 - 서비스 POST `/api/internal/matching-release-checks`: owner_id, recipient_id, member_id, requester_id, scopes. transfer-api 서비스 인증 전용. 실제 현재 검토 결과를 반환하며 미심사·반려 항목은 409, 주체/담당/활성/소개 관계 위반은 403.

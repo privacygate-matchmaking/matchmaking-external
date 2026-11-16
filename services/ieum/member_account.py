@@ -1,7 +1,8 @@
 """Member lifecycle relay. Internal owns account status and withdrawal decisions."""
 from typing import Literal
 
-from fastapi import Body, Depends, Request
+from fastapi import Body, Depends, Query, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, ValidationError
 
 from .core import deny
@@ -30,6 +31,20 @@ class MemberStatus(BaseModel):
     message: str | None = Field(default=None, max_length=1000)
 
 
+PHOTO_HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+               'Content-Security-Policy':"sandbox; default-src 'none'",'Content-Disposition':'inline'}
+
+
+def photo_response(result):
+    """Only an image may pass back toward the browser (metadata-stripped copy made by internal)."""
+    media=result.headers.get('content-type','').split(';')[0].strip()
+    body=result.content
+    jpeg=body.startswith(b'\xff\xd8\xff');png=body.startswith(b'\x89PNG\r\n\x1a\n')
+    if (media,jpeg,png) not in (('image/jpeg',True,False),('image/png',False,True)) or len(body)>4*1024*1024:
+        deny('INTERNAL_ERROR','invalid_photo_response')
+    return Response(body,media_type=media,headers=PHOTO_HEADERS)
+
+
 def status_from_response(response):
     try:
         result = MemberStatus.model_validate(response.json()).model_dump(exclude_none=True)
@@ -54,6 +69,10 @@ def register_account_relay(app,member,upstream,audit,enabled):
     @app.get('/api/internal/member-profile')
     def profile(request: Request,user=Depends(member)):
         return upstream('GET','/api/internal/my-profile',request).json()
+
+    @app.get('/api/internal/member-photo')
+    def photo(request: Request,which: Literal['approved','latest']=Query('approved'),user=Depends(member)):
+        return photo_response(upstream('GET','/api/internal/my-photo',request,params={'which':which}))
 
     @app.patch('/api/internal/member-profile')
     def profile_update(body: ProfileUpdate,request: Request,user=Depends(member)):
@@ -84,6 +103,10 @@ def register_account_bff(app,current,relay,audit):
     @app.get('/api/me/profile')
     def profile(request: Request,user=Depends(current)):
         return relay(request,'GET','/api/internal/member-profile').json()
+
+    @app.get('/api/me/profile/photo')
+    def photo(request: Request,which: Literal['approved','latest']=Query('approved'),user=Depends(current)):
+        return photo_response(relay(request,'GET','/api/internal/member-photo',params={'which':which}))
 
     @app.patch('/api/me/profile')
     def profile_update(body: ProfileUpdate,request: Request,user=Depends(current)):
