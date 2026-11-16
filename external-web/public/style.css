@@ -77,3 +77,10 @@
 .rule-checks small{font-size:11px}
 .rule-note{font-size:11px;line-height:1.8;margin:12px 0 0}
 @media(max-width:650px){.rule-checks{grid-template-columns:1fr}}
+
+/* 후보 카드: 회원이 쓴 소개글 + 직원 안내(작은 회색) */
+.candidate-card>p.candidate-intro{font-size:14px;line-height:1.85;flex:1;margin:16px 0 8px;white-space:pre-line;word-break:keep-all}
+.candidate-card>p.candidate-note{font-size:11px;line-height:1.6;color:var(--muted);margin:0 0 18px}
+.intro-count{font-size:11px;text-align:right;margin:4px 0 10px}
+#profile-intro{width:100%;padding:12px 14px;border:1px solid #dce1d8;border-radius:3px;background:#fbfcf9;font:inherit;font-size:14px;resize:vertical}
+.candidate-card>p.candidate-note{flex:none}

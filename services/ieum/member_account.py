@@ -14,11 +14,12 @@ class Withdrawal(Strict):
 
 
 class ProfileUpdate(Strict):
-    """내 계정: 키·몸무게(본인 신고)·연락처. 형식 검사와 저장은 내부가 최종 판단한다."""
+    """내 계정: 키·몸무게(본인 신고)·연락처·소개글. 형식 검사(소개글의 연락 수단 금지 포함)와 저장은 내부가 최종 판단한다."""
     height_cm: int | None = Field(default=None, ge=120, le=230)
     weight_kg: int | None = Field(default=None, ge=30, le=200)
     contact_phone: str | None = Field(default=None, max_length=20)
     contact_email: str | None = Field(default=None, max_length=200)
+    introduction: str | None = Field(default=None, max_length=300)
 
 
 class MemberStatus(BaseModel):

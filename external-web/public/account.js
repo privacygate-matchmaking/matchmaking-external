@@ -187,6 +187,23 @@ window.AccountUI = (() => {
       };
       body.append(bform); root.append(body);
 
+      // 3-1) 소개글: 소개 후보 카드에 그대로 보인다 (연락 수단은 내부가 거절)
+      const it = section('소개글', '소개 후보 화면에서 상대에게 보이는 글입니다. 전화번호·이메일·링크·메신저 아이디는 쓸 수 없습니다(연락처는 매칭 후 승인 절차로만 전달).');
+      const il = el('label', '', '내 소개 (10~300자)'); il.htmlFor = 'profile-intro';
+      const ia = el('textarea'); ia.id = 'profile-intro'; ia.maxLength = 300; ia.rows = 4; ia.value = profile.introduction || '';
+      const ic = el('p', 'muted intro-count', `${ia.value.length} / 300`);
+      ia.oninput = () => { ic.textContent = `${ia.value.length} / 300`; };
+      const isave = el('button', 'primary', '소개글 저장'); isave.type = 'submit';
+      const iform = el('form'); iform.append(il, ia, ic, isave);
+      iform.onsubmit = async e => {
+        e.preventDefault(); const text = ia.value.trim();
+        if (text.length < 10) { toast('소개글은 10자 이상 입력해 주세요.'); return; }
+        isave.disabled = true;
+        try { await api('/api/me/profile', {method:'PATCH', body:JSON.stringify({introduction: text})}); toast('소개글을 저장했습니다.'); await reload(); }
+        catch (error) { toast(error.message); } finally { if (isave.isConnected) isave.disabled = false; }
+      };
+      it.append(iform); root.append(it);
+
       // 4) 연락처: 여기서는 등록·변경만. 상대에게 주는 것은 매칭의 연락처 공개 동의 + 일정 확정 + 직원 요청 + 승인자 승인뿐
       const ct = section('연락처 변경', '연락처는 화면에 일부만 표시됩니다. 매칭 상대에게는 연락처 공개 동의, 만남 일정 확정, 상대의 동의, 담당 직원 요청과 승인 담당자 최종 승인을 모두 거친 경우에만 전달됩니다. 변경하면 이전에 승인된 연락처 자료는 더 이상 받을 수 없습니다.');
       ct.append(el('p', '', `현재: 전화 ${profile.contact_phone || '없음'} · 이메일 ${profile.contact_email || '없음'}`));
