@@ -95,7 +95,7 @@ window.MatchingUI = (() => {
     root.append(head,strip);
     show('all');
   }
-  // 매칭 조건: 필수 심사(신분증·학력·프로필 사진) + 정회원 이용권, 신청 규칙
+  // 매칭 조건: 필수 심사(신분증·학력·프로필 사진·혼인관계증명서) + 정회원 이용권, 신청 규칙
   function rulesBox(self,w) {
     const r=self.requirements||{};
     const box=el('section','match-rules');box.setAttribute('aria-label','매칭 조건');

@@ -18,7 +18,7 @@ $('#consent-form').onsubmit=async e=>{e.preventDefault();const expiry=new Date($
 (async()=>{try{me=await(await api('/api/me')).json();$('#initial-view').hidden=true;$('#login-view').hidden=true;$('#dashboard').hidden=false;$('#account').hidden=false;$('#member-name').textContent='회원 라운지';showMemberName();NotifyUI.start({api,toast});$('#tab-account').hidden=false;$('#today').textContent=new Date().toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'long',day:'numeric'});await load();}catch{login();}})();
 
 // 증빙 종류 선택지: 앞에 (필수)/(선택), 뒤에 최근 제출 상태 (제공됨 / 승인 대기중 / 반려됨 / 미제공)
-const EVIDENCE_REQUIRED=new Set(['identity','education']);
+const EVIDENCE_REQUIRED=new Set(['identity','education','marital']);      // 매칭 필수 서류 (프로필 사진은 내 계정에서)
 function evidenceKindLabels(items){
   const latest={};for(const item of items||[])if(!latest[item.kind])latest[item.kind]=item;
   for(const option of document.querySelectorAll('#evidence-kind option')){
