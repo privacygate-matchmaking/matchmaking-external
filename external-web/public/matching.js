@@ -2,11 +2,12 @@
 window.MatchingUI = (() => {
   const scopeNames = {name:'이름',profile:'소개 정보',education:'학력 검토 결과',employment:'재직 검토 결과',income:'소득 구간',marital_status:'혼인관계 검토 결과',property:'부동산 보유 검토 결과',photo:'프로필 사진',documents:'검토·마스킹된 문서 사본',contact:'연락처'};
   const scopeHints = {name:'승인되면 상대 화면의 소개 정보에서 "소개 상대" 대신 실명이 보입니다.',
-    photo:'직원이 검토한 사진(위치 등 정보 제거)입니다. 서로 사진 제공에 동의해야 서로의 사진을 볼 수 있습니다(나만 동의하면 상대도 내 사진을 볼 수 없습니다).',
+    photo:'직원이 검토한 사진(위치 등 정보 제거)입니다.',
     documents:'서류 심사를 통과한 학력·재직·소득·혼인·부동산 서류의 개인정보 가림 사본입니다. 원본은 제공하지 않습니다.',
     contact:'만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의한 뒤에만 승인 요청할 수 있습니다.'};
   const releaseOnly = [];
-  const conditional = {contact:' · 일정 확정 후',photo:' · 서로 제공 시'};
+  // 상호 공개 항목: 나와 상대가 같은 항목을 모두 공개해야 서로 볼 수 있다 (한쪽만 공개하면 둘 다 못 봄)
+  const conditional = {contact:' · 일정 확정 후 · 서로 공개 시',name:' · 서로 공개 시',photo:' · 서로 공개 시',income:' · 서로 공개 시',marital_status:' · 서로 공개 시',property:' · 서로 공개 시'};
   const states = {pending:'응답 대기',matched:'매칭 성립',rejected:'거절',cancelled:'신청 취소',expired:'응답 기간 만료',ended:'관계 종료'};
   const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
   const date = x => x ? new Date(x).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
@@ -143,7 +144,7 @@ window.MatchingUI = (() => {
     try {
       const data=await(await ctx.api(`/api/me/matches/${item.match_id}/sharing`)).json();
       if(!panel.isConnected)return;
-      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 체크한 항목은 담당 직원이 요청하고 승인 담당자가 승인해야 상대 화면에 표시됩니다(동의만으로는 보이지 않습니다). 연락처는 만남 일정이 확정되고 두 사람 모두 동의해야 요청할 수 있습니다. 동의는 언제든 철회할 수 있고, 철회하면 상대 화면에서도 사라집니다.'));
+      panel.replaceChildren(el('h4','','내 정보를 상대에게 공개하기'),note('원본 증빙은 공개하지 않습니다. 체크한 항목은 담당 직원이 요청하고 승인 담당자가 승인해야 상대 화면에 표시됩니다(동의만으로는 보이지 않습니다). 이름·프로필 사진·소득·혼인관계·부동산·연락처는 "서로 공개" 항목으로, 나와 상대가 같은 항목을 모두 공개해야 서로 볼 수 있습니다(나만 공개하면 상대도 볼 수 없습니다). 연락처는 만남 일정 확정도 필요합니다. 동의는 언제든 철회할 수 있고, 철회하면 상대 화면에서도 사라집니다.'));
       const form=el('form','sharing-form');const checks=[];
       for(const [code,name] of Object.entries(scopeNames)){
         const label=el('label','check-label');const input=el('input');input.type='checkbox';input.value=code;
@@ -186,7 +187,7 @@ window.MatchingUI = (() => {
       }else{
         panel.append(note('상대가 공개에 동의한 항목: '+(data.consented_scopes||[]).map(x=>scopeNames[x]||x).join(', ')+' · 담당 직원 요청과 승인 담당자 승인 후 여기에 표시됩니다.'));
       }
-      if(data.photo_pending)panel.append(note('프로필 사진: 상대는 사진 제공에 동의했습니다. 나도 사진 제공에 동의해야 서로의 사진을 볼 수 있습니다.'));
+      if((data.mutual_pending||[]).length)panel.append(note(`${data.mutual_pending.map(x=>scopeNames[x]||x).join(', ')}: 상대는 공개에 동의했습니다. 나도 같은 항목을 공개해야 서로 볼 수 있습니다.`));
       if(data.contact_pending)panel.append(note('연락처: 만남 일정이 확정되고 두 사람 모두 연락처 공개에 동의해야 승인 요청할 수 있습니다.'));
       panel.append(el('p','muted','공개 기한 '+date(data.expires_at)));
     }catch(e){panel.replaceChildren(note(e.message));}

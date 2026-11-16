@@ -238,6 +238,7 @@ def test_profile_shows_no_values_before_approval_and_tracks_contact_conditions(l
     s.share(B,mid,Sharing(scopes=['contact'],expires_at=now()+timedelta(days=1)))
     view=e.get(f'/api/me/matches/{mid}/profile').json()
     assert view['fields']==[] and view['contact_pending'] is True and 'SYNTHETIC-CONTACT' not in str(view)
+    assert view['mutual_pending']==['name']          # 상대는 이름 공개, 나는 미공개 → 서로 공개해야 볼 수 있음
     with lab['transfer'].state.database.connection() as db:
         db.execute("""INSERT INTO matching_meeting_proposals (proposal_id,round_id,match_id,proposed_by,starts_at,venue,address,status,created_at,confirmed_at,confirmed_by)
             VALUES (%s,%s,%s,%s,%s,%s,%s,'confirmed',%s,%s,%s)""",(str(new_id()),str(new_id()),mid,B,now()+timedelta(days=2),'카페','서울',now(),now(),'staff'))

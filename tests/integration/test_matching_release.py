@@ -190,3 +190,20 @@ def test_profile_photo_requires_mutual_consent_at_every_step(release_env):
     approval=t.post(f'/api/export-requests/{r.json()["request_id"]}/approve',headers=headers('APPROVER'),json={}).json()
     service.share(C,pair['match_id'],Sharing(scopes=['education'],expires_at=now()+timedelta(hours=1)))   # 상대가 사진 제공 철회
     assert download(release_env,approval).status_code==403
+
+
+def test_sensitive_items_need_mutual_consent_but_education_does_not(release_env):
+    """상호주의: 이름·소득·부동산·혼인관계·사진은 같은 항목을 서로 공개해야 전달, 학력·재직·소개는 한쪽만으로 가능."""
+    env,service,pair,_=release_env;t=env['t']
+    grant=service.share(B,pair['match_id'],Sharing(scopes=['education','income','property'],expires_at=now()+timedelta(hours=1)))
+    overview=t.get('/api/matching/overview',headers=headers()).json()['items'][0]
+    mine=next(g for g in overview['grants'] if g['owner_id']==B)
+    assert mine['mutual_waiting']==['income','property'] and mine['supported_scopes']==['education']
+    r=t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['income']})
+    assert r.status_code==403 and r.json()['error']['code']=='CONSENT_INVALID'
+    assert t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['education']}).status_code==201
+    service.share(C,pair['match_id'],Sharing(scopes=['income'],expires_at=now()+timedelta(hours=1)))   # 상대는 소득만
+    mine=next(g for g in t.get('/api/matching/overview',headers=headers()).json()['items'][0]['grants'] if g['owner_id']==B)
+    assert mine['mutual_waiting']==['property'] and 'income' in mine['supported_scopes']
+    assert t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['income']}).status_code==201
+    assert t.post('/api/matching/releases',headers=headers(),json={'grant_id':grant['grant_id'],'scopes':['income','property']}).status_code==403

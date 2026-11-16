@@ -174,19 +174,20 @@ def register_matching(app,config,database,member,upstream,audit):
         (counselor request + approver approval); the screen shows it from the member's approved deliveries."""
         context=service.disclosure(user['user_id'],match_id)
         d=directory(request,user);check_peer(d,context)
-        contact_ok=photo_ok=False
-        if {'contact','photo'}&set(context['scopes']):
-            from .matching_release import contact_ready, photo_ready
-            from .core import plain
+        from .matching_release import contact_ready, mutual_missing, MUTUAL
+        from .core import plain
+        contact_ok=False;waiting=[]
+        if ({'contact'}|MUTUAL)&set(context['scopes']):
             with service.transaction() as (db,t):
                 grant=db.execute('SELECT * FROM matching_grants WHERE grant_id=%s',(str(context['grant_id']),)).fetchone()
-                contact_ok=bool(grant) and 'contact' in context['scopes'] and contact_ready(db,plain(grant),strict=False)
-                photo_ok=bool(grant) and 'photo' in context['scopes'] and photo_ready(db,plain(grant),strict=False)
+                if grant:
+                    contact_ok='contact' in context['scopes'] and contact_ready(db,plain(grant),strict=False)
+                    waiting=mutual_missing(db,plain(grant),context['scopes'])     # 상대는 공개, 나는 아직 미공개
         record(request,'matching.profile_view',match_id)
         return {'member_id':context['member_id'],'fields':[],'expires_at':context['expires_at'],'data_source':mode,
                 'approval_required':True,'consented_scopes':context['scopes'],
                 'contact_pending':'contact' in context['scopes'] and not contact_ok,
-                'photo_pending':'photo' in context['scopes'] and not photo_ok,     # 상대는 사진 제공, 나는 아직 미제공
+                'photo_pending':'photo' in waiting,'mutual_pending':waiting,
                 'release_only_scopes':context['scopes'],'unavailable_scopes':[]}
 
     app.state.matching=service
