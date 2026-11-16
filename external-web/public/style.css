@@ -84,3 +84,4 @@
 .intro-count{font-size:11px;text-align:right;margin:4px 0 10px}
 #profile-intro{width:100%;padding:12px 14px;border:1px solid #dce1d8;border-radius:3px;background:#fbfcf9;font:inherit;font-size:14px;resize:vertical}
 .candidate-card>p.candidate-note{flex:none}
+.candidate-source{font-size:10.5px;color:#9aa39d;margin-top:2px}

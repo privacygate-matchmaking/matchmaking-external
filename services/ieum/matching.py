@@ -49,7 +49,8 @@ class Person(Input):
     eligible: bool=Field(strict=True)
     height_cm: int | None=Field(default=None,ge=100,le=250)      # 본인 신고
     weight_kg: int | None=Field(default=None,ge=20,le=250)
-    requirements: dict[Literal['identity','education','photo'],bool] | None=None     # 본인 카드만: 매칭 필수 조건 통과 여부
+    marital_status: str | None=Field(default=None,max_length=20)   # 혼인관계증명서 심사로 확정된 상태 (필수 증빙, 카드 공개)
+    requirements: dict[Literal['identity','education','photo','marital'],bool] | None=None     # 본인 카드만: 매칭 필수 조건 통과 여부
 
 
 class Directory(Input):
@@ -65,7 +66,7 @@ def months_after(date,months):
 
 def public(person):
     data=person.model_dump(mode='json')
-    return {k:data.get(k) for k in ('member_id','pseudo_id','age_band','job_group','introduction','height_cm','weight_kg')}
+    return {k:data.get(k) for k in ('member_id','pseudo_id','age_band','job_group','introduction','height_cm','weight_kg','marital_status')}
 
 
 def synthetic_directory(user_id):
