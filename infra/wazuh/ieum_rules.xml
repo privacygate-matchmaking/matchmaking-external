@@ -229,4 +229,78 @@
     <description>IEUM Keycloak role or group change by administrator: $(actor) $(reason) $(target_id)</description>
     <group>ieum_auth,ieum_admin_change,</group>
   </rule>
+  <!-- nginx 접속 기록 (internal-web·external-web, 쿼리 문자열 없음) -->
+  <rule id="100190" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="log_type">^nginx_access$</field>
+    <description>IEUM web access: $(service) $(method) $(uri) $(status)</description>
+  </rule>
+  <rule id="100194" level="6">
+    <if_sid>100190</if_sid>
+    <status type="pcre2">^5\d\d$</status>
+    <description>IEUM web server error: $(service) $(uri) $(status) (upstream $(upstream_status))</description>
+    <group>ieum_web,ieum_operations,</group>
+  </rule>
+  <rule id="100193" level="3">
+    <if_sid>100190</if_sid>
+    <status type="pcre2">^4\d\d$</status>
+    <description>IEUM web client error: $(service) $(remote_addr) $(method) $(uri) $(status)</description>
+    <group>ieum_web,</group>
+  </rule>
+  <rule id="100192" level="10" frequency="10" timeframe="60">
+    <if_matched_sid>100193</if_matched_sid>
+    <same_field>remote_addr</same_field>
+    <description>IEUM possible web scanning or forced browsing: 10 client errors in 60s from $(remote_addr)</description>
+    <group>ieum_web,ieum_repeated,</group>
+  </rule>
+  <!-- 컨테이너 상태 (docker events) -->
+  <rule id="100200" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="log_type">^docker_event$</field>
+    <description>IEUM container event: $(container) $(action)</description>
+  </rule>
+  <rule id="100203" level="12">
+    <if_sid>100200</if_sid>
+    <action type="pcre2">^oom$</action>
+    <description>IEUM container killed by out-of-memory: $(container)</description>
+    <group>ieum_container,ieum_operations,</group>
+  </rule>
+  <rule id="100202" level="10">
+    <if_sid>100200</if_sid>
+    <action type="pcre2">^(die|kill|stop)$</action>
+    <field name="container" type="pcre2">^matchmaking-(internal-api|transfer-api|external-api|keycloak|business-db|transfer-db|internal-web|external-web|auth-gateway)-\d+$</field>
+    <description>IEUM core service container stopped: $(container) $(action) (exit $(exit_code))</description>
+    <group>ieum_container,ieum_operations,</group>
+  </rule>
+  <rule id="100204" level="8">
+    <if_sid>100200</if_sid>
+    <action type="pcre2">^health_status: unhealthy$</action>
+    <description>IEUM container unhealthy: $(container)</description>
+    <group>ieum_container,ieum_operations,</group>
+  </rule>
+  <rule id="100201" level="3">
+    <if_sid>100200</if_sid>
+    <action type="pcre2">^(start|restart)$</action>
+    <description>IEUM container started: $(container)</description>
+    <group>ieum_container,</group>
+  </rule>
+  <!-- 파일 무결성 검사 (FIM, /monitored = 세 레포 읽기 전용, 비밀값 폴더 제외) -->
+  <rule id="100212" level="13">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/monitored/(matchmaking-external/infra/wazuh/|privacygate/infra/db/|privacygate/infra/scripts/audit-verify)</field>
+    <description>IEUM detection rule, audit tool or database permission definition changed: $(file)</description>
+    <group>ieum_fim,ieum_integrity,</group>
+  </rule>
+  <rule id="100211" level="12">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/monitored/(privacygate/src/privacygate|matchmaking-external/services/ieum|matchmaking-internal/internal-api/app)/</field>
+    <description>IEUM access-control or PrivacyGate policy code changed: $(file)</description>
+    <group>ieum_fim,ieum_policy_change,</group>
+  </rule>
+  <rule id="100210" level="12">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/monitored/[^/]+/(compose[^/]*\.ya?ml|\.env|.*nginx[^/]*\.conf|infra/keycloak/|infra/funnel/)</field>
+    <description>IEUM deployment or environment configuration changed (compose/.env/nginx/Keycloak): $(file)</description>
+    <group>ieum_fim,ieum_config_change,</group>
+  </rule>
 </group>

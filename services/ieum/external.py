@@ -12,6 +12,7 @@ from uuid import UUID
 import httpx
 from fastapi import Depends, File, Form, Header, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from privacygate import mtls
 from privacygate.errors import GateError
 from privacygate.session_rules import csrf_problem
 
@@ -35,7 +36,7 @@ def create_app(config=None, identity=None, upstream=None):
     if config['mode'] not in ('enforce','baseline'):
         raise RuntimeError('Invalid GATE_MODE')
     identity = identity or Identity(config['discovery'])
-    upstream = upstream or httpx.Client(base_url=config['transfer'], timeout=15, trust_env=False)
+    upstream = upstream or httpx.Client(base_url=config['transfer'], timeout=15, trust_env=False, **mtls.client_options())
     sessions = Sessions(config['sessions'], config['key'])
     audit = Audit('external-api', config['audit'])
     app = application('external-api', audit)

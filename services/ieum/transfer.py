@@ -25,6 +25,7 @@ EvidenceKind=Literal['education','employment','identity','marital','income','pro
 def evidence_format_ok(kind,content):
     if kind=='photo':return content.startswith(b'\xff\xd8\xff') or content.startswith(b'\x89PNG\r\n\x1a\n')
     return content.startswith(b'%PDF-')
+from privacygate import mtls
 from privacygate.errors import GateError
 
 PROFILE_FIELDS={'schema_version','member_id','display_name','age_band','job_group','introduction'}
@@ -71,7 +72,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
         raise RuntimeError('Invalid GATE_MODE')
     database=database or Database(config['database'])
     identity=identity or Identity(config['discovery'])
-    internal=internal or httpx.Client(base_url=config['internal'],timeout=15,trust_env=False)
+    internal=internal or httpx.Client(base_url=config['internal'],timeout=15,trust_env=False,**mtls.client_options())
     staging,verified=Path(config['staging']),Path(config['verified'])
     staging.mkdir(parents=True,exist_ok=True); verified.mkdir(parents=True,exist_ok=True)
 

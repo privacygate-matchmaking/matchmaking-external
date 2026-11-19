@@ -108,6 +108,20 @@ docker exec ieum-wazuh-wazuh.manager-1 /var/ossec/bin/wazuh-control status
 | `rule.id:100181` | 같은 계정 2분 안에 로그인 5번 실패 |
 | `rule.id:100182` | Keycloak 무차별 대입 잠금 |
 | `rule.id:100183` | Keycloak 역할·그룹 변경 (관리자, 앱 자동 처리 제외) |
+| `rule.id:100192` | 같은 접속 주소에서 60초 안 4xx 10번 (웹 스캔·강제 탐색 의심) |
+| `rule.id:100193` / `100194` | 웹 4xx / 5xx (nginx 접속 기록) |
+| `rule.id:100201` | 컨테이너 시작 |
+| `rule.id:100202` | 핵심 서비스 컨테이너 중지 (internal-api·transfer-api·external-api·Keycloak·DB·웹) |
+| `rule.id:100203` / `100204` | 컨테이너 메모리 부족 종료 / unhealthy |
+| `rule.id:100210` | 배포·환경 설정 변경 (compose·.env·nginx·Keycloak 설정, FIM) |
+| `rule.id:100211` | 접근통제·PrivacyGate 정책 코드 변경 (FIM) |
+| `rule.id:100212` | 탐지 규칙·감사 검사 도구·DB 권한 정의 변경 (FIM) |
+
+### 수집 범위 (보안 강화 3차)
+- **nginx 접속 기록**: internal-web·external-web 가 `web-logs` 볼륨에 JSON 으로 남기고(쿼리 문자열·쿠키 없음) Wazuh 가 읽기 전용으로 수집.
+- **컨테이너 상태**: `wazuh.py start` 가 호스트에서 `docker events`(시작·종료·kill·OOM·health) 를 `.local/wazuh/host-events/` 에 기록 → Wazuh 수집. Wazuh 스택에 docker.sock 은 주지 않는다. `wazuh.py stop` 이 기록도 멈춘다.
+- **파일 무결성 검사(FIM)**: 세 레포를 `/monitored` 에 읽기 전용으로 붙여 실시간 + 5분 주기 검사. `infra/secrets`·`evidence`·`.local`·`.venv` 는 빈 tmpfs 로 가려 Wazuh 컨테이너에 보이지 않는다. 변경 내용(diff)은 남기지 않고 해시만 비교한다 (.env 값 노출 방지).
+- **대시보드**: `.venv/bin/python scripts/wazuh.py dashboard` → Explore > Dashboards > "PrivacyGate 관제" (허용·거부, 거부 사유, 위험도별 경보, 분야별 경보, 서비스별 마지막 수신 시각, trace_id 추적).
 | `data.lab_fixture:true` | 합성 수집 시험 이벤트 |
 | `data.trace_id:요청값` | 한 요청의 서비스별 기록 추적 |
 
