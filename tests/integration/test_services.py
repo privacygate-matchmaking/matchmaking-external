@@ -119,6 +119,10 @@ def env(tmp_path):
             return httpx.Response(200,json={'member_id':body['member_id'],'fields':[
               {'scope':'employment','label':'재직','value':'합성 연구직','review_status':'reviewed','reviewed_at':iso(now())},
               {'scope':'contact','label':'연락처','value':'SYNTHETIC-CONTACT','review_status':'reviewed','reviewed_at':iso(now())}]})
+        if req.url.path=='/api/internal/security-events':
+            if state.get('security_down'):return httpx.Response(500,json={'error':{'code':'INTERNAL_ERROR'}})
+            state.setdefault('security_events',[]).append({**json.loads(req.content),'user_token':req.headers.get('X-User-Token')})
+            return httpx.Response(200,json={'incident_id':str(uuid4()),'locked_until':None,'newly_locked':False})
         if req.url.path=='/api/internal/member-notification-events':
             if state.get('events_fail'):return httpx.Response(500,json={'error':{'code':'INTERNAL_ERROR'}})
             state.setdefault('events',[]).append({**json.loads(req.content),'user_token':req.headers.get('X-User-Token')})
@@ -450,3 +454,68 @@ def test_profile_v2_rejects_malformed_files(env,bad):
 def test_legacy_name_only_file_is_not_automatically_trusted(env):
     f=upload(env,json.dumps({'member_pseudo_id':'M-001','age_band':'30대','job_group':'연구','introduction':'가상 자료'}).encode())
     assert f['scan_status']=='blocked' and f['export_banned']
+
+
+# ---------- 사후 대응: 공격 ② 보안 사건 알림 · 총관리자 자료 회수 ----------
+def test_mismatch_is_reported_to_internal_with_member_token(env):
+    d,_=approved(env); private=upload(env,b'name,phone\nSYNTHETIC,010-0000-0000')
+    login(env)
+    r=env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download',params={'file_id':private['file_id']})
+    assert r.status_code==403 and r.json()['error']['code']=='APPROVAL_MISMATCH'
+    events=env['state']['security_events']
+    assert events==[{'kind':'approval_mismatch','reason':'requested_file_not_approved','blocked':True,
+                     'delivery_id':d['delivery_id'],'user_token':'MEMBER'}]
+    log=(env['root']/'transfer.jsonl').read_text()
+    assert 'security.report' in log and 'SYNTHETIC' not in log
+
+
+def test_baseline_swap_is_reported_as_not_blocked(env):
+    d,_=approved(env); private=upload(env,b'name,phone\nSYNTHETIC,010-0000-0000')
+    env['cfg']['mode']='baseline';login(env)
+    r=env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download',params={'file_id':private['file_id']})
+    assert r.status_code==200
+    assert [e['blocked'] for e in env['state']['security_events']]==[False]
+
+
+def test_normal_download_and_integrity_faults_are_not_reported(env):
+    d,f=approved(env);login(env)
+    assert env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download').status_code==200
+    (Path(env['cfg']['verified'])/f['file_id']).write_bytes(b'changed')       # 시스템 쪽 무결성 문제
+    assert env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download').status_code==403
+    assert 'security_events' not in env['state']
+
+
+def test_report_failure_keeps_block(env):
+    d,_=approved(env); private=upload(env,b'SYNTHETIC,private')
+    env['state']['security_down']=True;login(env)
+    r=env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download',params={'file_id':private['file_id']})
+    assert r.status_code==403 and b'SYNTHETIC' not in r.content
+    assert 'security_report_failed' in (env['root']/'transfer.jsonl').read_text()
+
+
+def test_locked_or_suspended_member_is_blocked(env):
+    env['cfg']['member_status_check']=True
+    d,_=approved(env);login(env)
+    for status in ('locked','suspended'):
+        env['state']['member_status']={'status':status,'message':'보안 점검 중인 계정입니다.'}
+        r=env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download')
+        assert r.status_code==403 and '보안 점검' in r.json()['error']['message']
+        assert env['e'].get('/api/me/status').json()['status']==status
+
+
+@pytest.mark.parametrize('token',['COUNSELOR','APPROVER','MEMBER'])
+def test_revoke_deliveries_is_admin_only(env,token):
+    approved(env)
+    r=env['t'].post(f'/api/security/recipients/{B}/revoke-deliveries',headers=headers(token),json={})
+    assert r.status_code in (401,403)
+
+
+def test_admin_revokes_all_deliveries_of_member(env):
+    d,_=approved(env);d2,_=approved(env)
+    r=env['t'].post(f'/api/security/recipients/{B}/revoke-deliveries',headers=headers('ADMIN'),json={})
+    assert r.status_code==200 and r.json()['revoked']==2
+    login(env)
+    assert {i['request_status'] for i in env['e'].get('/api/me/deliveries').json()['items']}=={'revoked'}
+    assert env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download').status_code==403
+    again=env['t'].post(f'/api/security/recipients/{B}/revoke-deliveries',headers=headers('ADMIN'),json={})
+    assert again.json()['revoked']==0

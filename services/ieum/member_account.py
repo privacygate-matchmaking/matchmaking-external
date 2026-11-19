@@ -23,7 +23,7 @@ class ProfileUpdate(Strict):
 
 
 class MemberStatus(BaseModel):
-    status: Literal['active','withdraw_pending','withdrawn','not_registered']
+    status: Literal['active','withdraw_pending','withdrawn','not_registered','locked','suspended']
     by: Literal['self','staff'] | None = None
     reason: str | None = Field(default=None, max_length=200)
     withdraw_at: str | None = None

@@ -99,4 +99,32 @@
     <description>IEUM account cleanup refused a non-member account target</description>
     <group>ieum_lifecycle,</group>
   </rule>
+  <!-- 사후 대응 (자동 임시 잠금·총관리자 조치) -->
+  <rule id="100150" level="12">
+    <if_sid>100102</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^security\.auto_lock$</action>
+    <description>IEUM account automatically locked after repeated denials: $(target_id) ($(reason))</description>
+    <group>ieum_response,</group>
+  </rule>
+  <rule id="100151" level="8">
+    <if_sid>100101</if_sid>
+    <field name="reason">^account_temporarily_locked$</field>
+    <description>IEUM request from temporarily locked account blocked: $(actor) $(action)</description>
+    <group>ieum_response,</group>
+  </rule>
+  <rule id="100152" level="10">
+    <if_sid>100102</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^security\.(suspend_account|restore_account|unlock|revoke_deliveries)$</action>
+    <description>IEUM security response action by $(actor): $(action) on $(target_id)</description>
+    <group>ieum_response,</group>
+  </rule>
+  <rule id="100153" level="10">
+    <if_sid>100103</if_sid>
+    <field name="service">^transfer-api$</field>
+    <action type="pcre2">^security\.report$</action>
+    <description>IEUM transfer could not report an attack-2 incident to internal; review transfer audit</description>
+    <group>ieum_response,ieum_operations,</group>
+  </rule>
 </group>

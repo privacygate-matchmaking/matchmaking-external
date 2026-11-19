@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -64,7 +65,8 @@ class Audit:
                            target_type=target_type if target else None, target_id=target, reason=reason)
 
 
-def application(title, audit):
+def application(title, audit, on_deny=None):
+    """on_deny(request, exc): 거부 응답 전에 부르는 사후 대응 훅 (보안 사건 알림 등). 실패해도 거부 결정은 바뀌지 않는다."""
     app = FastAPI(title=title, docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(BodyLimit)
 
@@ -84,6 +86,12 @@ def application(title, audit):
         audit.record(request, action, 'deny', exc.reason, target=getattr(request.state,'delivery_id',None))
         for kind,value in getattr(request.state,'audit_references',[]):
             audit.record(request,'delivery.reference','deny',kind+'_reference',target=value,target_type=kind)
+        if on_deny is not None:
+            try:
+                from starlette.concurrency import run_in_threadpool
+                await run_in_threadpool(on_deny, request, exc)
+            except Exception:
+                logging.getLogger('ieum.security').exception('deny hook failed')
         return JSONResponse(error_body(exc.code, request.state.trace_id, message=exc.message), status_code=exc.status)
 
     @app.exception_handler(RequestValidationError)

@@ -73,7 +73,27 @@ def create_app(config=None, identity=None, database=None, internal=None):
             db.execute('INSERT INTO audit_log (ts,trace_id,actor,role,action,target_type,target_id,result,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)',tuple(event.get(k) for k in keys))
 
     audit=Audit('transfer-api',config['audit'],insert)
-    app=application('transfer-api',audit)
+
+    # 사후 대응: 회원의 승인 외 자료 요청(공격 ②)을 내부 보안 사건으로 알린다. 대상 회원은 내부가 회원 토큰으로 정한다.
+    # 승인 파일 무결성·버전 문제(시스템 쪽 원인)는 알리지 않는다. 알림 실패는 차단 결정을 바꾸지 않는다.
+    REPORT_REASONS={'requested_file_not_approved','recipient_mismatch'}
+
+    def report_mismatch(request,reason,blocked):
+        if getattr(request.state,'principal',{}).get('role')!='member' or not getattr(request.state,'user_token',None):
+            return
+        try:
+            body={'kind':'approval_mismatch','reason':reason,'blocked':blocked}
+            if getattr(request.state,'delivery_id',None):body['delivery_id']=request.state.delivery_id
+            upstream('POST','/api/internal/security-events',request,json=body)
+            audit.record(request,'security.report',reason=reason,target=getattr(request.state,'delivery_id',None))
+        except GateError:
+            audit.record(request,'security.report','error','security_report_failed')
+
+    def on_deny(request,exc):
+        if exc.code.value=='APPROVAL_MISMATCH' and exc.reason in REPORT_REASONS:
+            report_mismatch(request,exc.reason,True)
+
+    app=application('transfer-api',audit,on_deny)
 
     def staff(request: Request):
         user=principal(identity.verify(bearer(request),'transfer-api','internal-web'))
@@ -378,11 +398,28 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 deny(problem[0].value,problem[1])
             approved_bytes=bytes_for(approved)
             selected=fetch_file(db,file_id) if config['mode']=='baseline' and file_id else approved
+            swapped=selected['file_id']!=approved['file_id']
             content=bytes_for(selected) if selected['file_id']!=approved['file_id'] else approved_bytes
             db.execute('UPDATE deliveries SET downloaded_at=%s WHERE delivery_id=%s',(now(),str(delivery_id)))
         audit.record(request,'delivery.download',reason='baseline_file_binding_omitted' if config['mode']=='baseline' else None,target=str(delivery_id))
+        if swapped:   # baseline: 막지 못했지만 탐지는 한다 → '차단 안 됨' 보안 사건
+            report_mismatch(request,'requested_file_not_approved',False)
         return Response(content,media_type='application/json' if selected['scan_status']=='passed' else 'text/csv',
                         headers={'Content-Disposition':'attachment; filename="ieum-material"'})
+
+    # 보안 사건 대응(총관리자): 회원이 받은 소개 자료 승인을 모두 회수. internal-api 가 총관리자 토큰으로 부른다
+    @app.post('/api/security/recipients/{user_id}/revoke-deliveries')
+    def revoke_recipient(user_id: UUID,request: Request,body: Empty=Body(...),user=Depends(role('data_admin'))):
+        require_role(user,('data_admin',))
+        with database.connection() as db:
+            rows=db.execute('SELECT a.approval_id,a.request_id FROM deliveries d JOIN approvals a ON a.approval_id=d.approval_id '
+                            'WHERE d.recipient_id=%s AND a.revoked_at IS NULL',(str(user_id),)).fetchall()
+            for row in rows:
+                db.execute('UPDATE approvals SET revoked_at=%s WHERE approval_id=%s',(now(),str(row['approval_id'])))
+                db.execute("UPDATE export_requests SET request_status='revoked' WHERE request_id=%s",(str(row['request_id']),))
+        audit.record(request,'security.revoke_deliveries',reason=f'revoked_{len(rows)}',target=str(user_id),target_type='user')
+        if rows:notify(request,[str(user_id)],'release_revoked')
+        return {'recipient_id':str(user_id),'revoked':len(rows)}
 
     @app.post('/api/internal/evidence-submissions',status_code=201)
     async def evidence_submit(request: Request,file: UploadFile=File(...),

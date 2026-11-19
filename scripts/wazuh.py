@@ -278,7 +278,11 @@ def cases():
         (event(service='external-api',action='login',result='allow',reason=None),'100102'),
         (event(action='member_purge',result='error',reason='purge_failed'),'100140'),
         (event(action='evidence_delete',result='error',reason='delete_failed'),'100141'),
-        (event(action='member_account_delete',result='error',reason='not_member_account'),'100142')]
+        (event(action='member_account_delete',result='error',reason='not_member_account'),'100142'),
+        (event(action='security.auto_lock',result='allow',reason='repeated_role_denials',actor='system',target_id='U-LAB-B'),'100150'),
+        (event(action='GET /api/members',reason='account_temporarily_locked',actor='U-LAB-C'),'100151'),
+        (event(action='security.suspend_account',result='allow',reason='keycloak_done',actor='U-LAB-D',target_id='U-LAB-C'),'100152'),
+        (event(service='transfer-api',action='security.report',result='error',reason='security_report_failed',actor='U-LAB-E'),'100153')]
 
 
 def rules():

@@ -91,6 +91,10 @@ docker exec ieum-wazuh-wazuh.manager-1 /var/ossec/bin/wazuh-control status
 | `rule.id:100140` | 내부 회원 정보 삭제 실패 |
 | `rule.id:100141` | 내부 증빙 원본 삭제 실패 |
 | `rule.id:100142` | 계정 정리 중 비회원 계정 삭제 거부 |
+| `rule.id:100150` | 반복 거부로 계정 자동 임시 잠금 (사후 대응) |
+| `rule.id:100151` | 임시 잠긴 계정의 요청 차단 |
+| `rule.id:100152` | 총관리자 사후 조치 (잠금 해제·계정 정지·복구·받은 자료 회수) |
+| `rule.id:100153` | 중계가 공격 ② 보안 사건을 내부에 알리지 못함 |
 | `data.lab_fixture:true` | 합성 수집 시험 이벤트 |
 | `data.trace_id:요청값` | 한 요청의 서비스별 기록 추적 |
 
