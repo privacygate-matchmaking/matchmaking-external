@@ -56,7 +56,7 @@ services:
     image: postgres:16-alpine
     environment:
       PGPASSWORD: ${TRANSFER_DB_OWNER_PASSWORD:?}
-    command: ["psql", "-h", "transfer-db", "-U", "db_owner", "-d", "matchmaking_transfer", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", "/migrations/002_meetings.sql"]
+    command: ["psql", "-h", "transfer-db", "-U", "db_owner", "-d", "matchmaking_transfer", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", "/migrations/002_meetings.sql", "-f", "/migrations/003_download_controls.sql"]
     volumes:
       - ../matchmaking-external/infra/migrations:/migrations:ro
     networks: [transfer-db-net]

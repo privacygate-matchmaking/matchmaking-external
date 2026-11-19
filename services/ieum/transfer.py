@@ -2,13 +2,14 @@ import hashlib
 import json
 import os
 import re
+import secrets
 from datetime import timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
 import httpx
-from fastapi import Body, Depends, File, Form, Request, UploadFile
+from fastapi import Body, Depends, File, Form, Header, Request, UploadFile
 from fastapi.responses import Response
 from privacygate.transfer_rules import ApprovedDelivery, StoredFile, delivery_problem
 
@@ -57,8 +58,15 @@ def create_app(config=None, identity=None, database=None, internal=None):
         'staging':os.getenv('STAGING_DIR','/data/transfer-staging'),'verified':os.getenv('VERIFIED_DIR','/data/transfer-verified'),
         'audit':os.getenv('AUDIT_LOG_PATH','/var/log/matchmaking/transfer-api.json'),'mode':os.getenv('GATE_MODE','enforce'),
         'matching_directory_mode':os.getenv('MATCHING_DIRECTORY_MODE','internal'),
-        'test_payments':os.getenv('ENABLE_TEST_PAYMENTS','false').lower()=='true'}
+        'test_payments':os.getenv('ENABLE_TEST_PAYMENTS','false').lower()=='true',
+        'download_tokens':os.getenv('DOWNLOAD_TOKENS','true').lower()=='true',
+        'download_token_ttl':int(os.getenv('DOWNLOAD_TOKEN_TTL','60')),'max_downloads':int(os.getenv('MAX_DOWNLOADS','5'))}
     config.setdefault('member_status_check',os.getenv('MEMBER_STATUS_CHECK','false').lower()=='true')
+    # 안전한 반출 (enforce 에서만): 일회용 다운로드 토큰(짧은 만료·재사용 차단)과 제공 건당 다운로드 횟수 제한.
+    # 시험용 config 에 값이 없으면 끈다 (기존 시험 호환). 배포 기본: 토큰 사용, 60초, 3회.
+    config.setdefault('download_tokens',False)
+    config.setdefault('download_token_ttl',60)
+    config.setdefault('max_downloads',0)
     if config['mode'] not in ('enforce','baseline'):
         raise RuntimeError('Invalid GATE_MODE')
     database=database or Database(config['database'])
@@ -260,7 +268,8 @@ def create_app(config=None, identity=None, database=None, internal=None):
             request_id=uid()
             db.execute('INSERT INTO export_requests (request_id,requester_id,file_id,file_version,file_hash,recipient_id,member_id,consent_id,purpose,request_status,expires_at,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)',
                 (request_id,user['user_id'],str(body.file_id),file['file_version'],file['file_hash'],str(body.recipient_id),str(body.member_id),str(body.consent_id),body.purpose,'pending',expires,now()))
-        audit.record(request,'release.request',target=request_id,target_type='export_request')
+        audit.record(request,'release.request',target=request_id,target_type='export_request',owner_id=body.member_id,
+                     recipient_id=body.recipient_id,consent_id=body.consent_id,file_id=body.file_id,file_hash=file['file_hash'])
         return {'request_id':request_id,'request_status':'pending','created_at':iso(now())}
 
     def visible(db,request_id,user,lock=False):
@@ -310,7 +319,9 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 db.execute('INSERT INTO deliveries (delivery_id,approval_id,recipient_id,created_at) VALUES (%s,%s,%s,%s)',(delivery_id,approval_id,item['recipient_id'],now()))
             status='approved' if approve else 'rejected'
             db.execute('UPDATE export_requests SET request_status=%s WHERE request_id=%s',(status,str(request_id)))
-        audit.record(request,'release.'+status)
+        audit.record(request,'release.'+status,target=str(request_id),target_type='export_request',owner_id=item['member_id'],
+                     recipient_id=item['recipient_id'],consent_id=item['consent_id'],file_id=item['file_id'],file_hash=item['file_hash'],
+                     approval_id=approval_id if approve else None)
         result={'request_id':str(request_id),'request_status':status}
         if approve:
             result.update(approval_id=approval_id,delivery_id=delivery_id,expires_at=item['expires_at'])
@@ -334,12 +345,13 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 deny('NOT_FOUND','approval_missing')
             db.execute('UPDATE approvals SET revoked_at=%s WHERE approval_id=%s',(now(),str(approval_id)))
             db.execute("UPDATE export_requests SET request_status='revoked' WHERE request_id=%s",(row['request_id'],))
+            drop_tokens(db,approval_id=str(approval_id))
         audit.record(request,'release.revoke')
         if not row['revoked_at']:notify(request,[str(row['recipient_id'])],'release_revoked')
         return {'approval_id':str(approval_id),'request_status':'revoked','revoked_at':iso(now())}
 
     JOIN='''SELECT r.*, a.approval_id,a.approved_file_id,a.approved_file_version,a.approved_file_hash,
-      a.expires_at AS approval_expires_at,a.revoked_at,d.delivery_id,d.downloaded_at
+      a.expires_at AS approval_expires_at,a.revoked_at,d.delivery_id,d.downloaded_at,d.download_count
       FROM deliveries d JOIN approvals a ON a.approval_id=d.approval_id
       JOIN export_requests r ON r.request_id=a.request_id'''
 
@@ -365,43 +377,100 @@ def create_app(config=None, identity=None, database=None, internal=None):
                 result.append({'match_id':match_id,'delivery_id':row['delivery_id'],'approval_id':row['approval_id'],'file_id':row['approved_file_id'],
                     'file_version':row['approved_file_version'],'purpose':row['purpose'],'request_status':status,
                     'expires_at':iso(min(stamp(row['expires_at']),stamp(row['approval_expires_at']))),
-                    'downloaded_at':row['downloaded_at'],'download_url':f'/api/me/deliveries/{row["delivery_id"]}/download'})
+                    'downloaded_at':row['downloaded_at'],'download_count':int(row.get('download_count') or 0),'download_limit':config['max_downloads'] if config['mode']=='enforce' else 0,'download_url':f'/api/me/deliveries/{row["delivery_id"]}/download'})
             return {'items':result}
 
+    def drop_tokens(db,approval_id):
+        """승인 회수·자료 회수 시 아직 쓰지 않은 다운로드 토큰도 폐기한다."""
+        if config['download_tokens']:
+            db.execute('UPDATE download_tokens SET used_at=%s WHERE used_at IS NULL AND delivery_id IN '
+                       '(SELECT delivery_id FROM deliveries WHERE approval_id=%s)',(now(),approval_id))
+
+    def eligible(db,request,delivery_id,user,file_id=None):
+        """다운로드·토큰 발급 공통 판단: 수신자·승인·회수·동의·만료·파일 ID/버전/해시·검사 상태·횟수."""
+        raw=db.execute(JOIN+' WHERE d.delivery_id=%s AND d.recipient_id=%s'+('' if database.test else ' FOR UPDATE'),(str(delivery_id),user['user_id'])).fetchone()
+        if not raw:
+            deny('NOT_FOUND','delivery_missing')
+        row=plain(raw)
+        request.state.audit_references=[('approval',row['approval_id'])]
+        request.state.audit_detail={'owner_id':row['member_id'],'recipient_id':row['recipient_id'],'consent_id':row['consent_id'],
+                                    'approval_id':row['approval_id'],'file_id':row['approved_file_id'],'file_hash':row['approved_file_hash']}
+        if file_id:
+            request.state.audit_references.append(('requested_file',str(file_id)))
+        if row['revoked_at']:
+            deny('ACCESS_DENIED','approval_revoked')
+        approved=fetch_file(db,row['approved_file_id'])
+        consent=release_check(db,row,approved)
+        if approved['export_banned']:
+            deny('ACCESS_DENIED','approved_file_banned')
+        record=ApprovedDelivery(str(delivery_id),row['recipient_id'],row['request_status'],
+            min(stamp(row['expires_at']),stamp(row['approval_expires_at']),stamp(consent['expires_at'])),
+            row['approved_file_id'],row['approved_file_version'],row['approved_file_hash'],True)
+        stored=StoredFile(approved['file_id'],approved['file_version'],approved['file_hash'],approved['scan_status'])
+        # Always enforce the common approval eligibility checks, even in baseline.
+        # Upstream baseline=True would skip consent/expiry and is intentionally NOT used.
+        problem=delivery_problem(record,stored,requester_id=user['user_id'],now=now(),
+            requested_file_id=str(file_id) if file_id and config['mode']=='enforce' else None,baseline=False)
+        if problem:
+            deny(problem[0].value,problem[1])
+        if config['mode']=='enforce' and config['max_downloads'] and int(row.get('download_count') or 0)>=config['max_downloads']:
+            deny('ACCESS_DENIED','download_limit_reached',f'이 자료는 최대 {config["max_downloads"]}회까지 내려받을 수 있습니다. 담당 매니저에게 문의해 주세요.')
+        return row,approved
+
+    def token_hash(token):
+        return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+    @app.post('/api/internal/deliveries/{delivery_id}/download-tokens',status_code=201)
+    def issue_token(delivery_id: UUID,request: Request,body: Empty=Body(...),user=Depends(member)):
+        """일회용 다운로드 토큰. 발급 때도 같은 판단을 하고, 원문은 응답에만 담고 DB 에는 해시만 둔다.
+        같은 제공 건의 쓰지 않은 이전 토큰은 폐기한다 (한 번에 하나)."""
+        request.state.delivery_id=str(delivery_id)
+        if not config['download_tokens'] or config['mode']!='enforce':
+            return {'token':None,'expires_in':0,'required':False}
+        token=secrets.token_urlsafe(32)
+        with database.connection() as db:
+            db.lock()
+            eligible(db,request,delivery_id,user)
+            db.execute('UPDATE download_tokens SET used_at=%s WHERE delivery_id=%s AND used_at IS NULL',(now(),str(delivery_id)))
+            db.execute('INSERT INTO download_tokens (token_hash,delivery_id,recipient_id,created_at,expires_at) VALUES (%s,%s,%s,%s,%s)',
+                (token_hash(token),str(delivery_id),user['user_id'],now(),now()+timedelta(seconds=config['download_token_ttl'])))
+        audit.record(request,'delivery.token_issue',target=str(delivery_id))
+        return {'token':token,'expires_in':config['download_token_ttl'],'required':True}
+
+    def consume_token(db,delivery_id,user,token):
+        if not token:
+            deny('ACCESS_DENIED','download_token_required','다운로드 버튼으로 다시 내려받아 주세요.')
+        row=db.execute('SELECT * FROM download_tokens WHERE token_hash=%s'+('' if database.test else ' FOR UPDATE'),(token_hash(token),)).fetchone()
+        if not row:
+            deny('ACCESS_DENIED','download_token_invalid')
+        row=plain(row)
+        if str(row['delivery_id'])!=str(delivery_id) or str(row['recipient_id'])!=user['user_id']:
+            deny('ACCESS_DENIED','download_token_invalid')
+        if row['used_at']:
+            deny('ACCESS_DENIED','download_token_used','이미 사용한 다운로드 링크입니다. 다시 내려받으려면 버튼을 눌러 주세요.')
+        if stamp(row['expires_at'])<=now():
+            deny('ACCESS_DENIED','download_token_expired','다운로드 링크가 만료되었습니다. 다시 시도해 주세요.')
+        db.execute('UPDATE download_tokens SET used_at=%s WHERE token_hash=%s',(now(),token_hash(token)))
+
     @app.get('/api/internal/deliveries/{delivery_id}/download')
-    def download(delivery_id: UUID,request: Request,file_id: UUID | None=None,user=Depends(member)):
+    def download(delivery_id: UUID,request: Request,file_id: UUID | None=None,user=Depends(member),
+                 token: str | None=Header(None,alias='X-Download-Token',max_length=128)):
+        """토큰은 주소창·접속 기록에 남지 않게 헤더로만 받는다."""
         request.state.delivery_id=str(delivery_id)
         with database.connection() as db:
             db.lock()
-            raw=db.execute(JOIN+' WHERE d.delivery_id=%s AND d.recipient_id=%s'+('' if database.test else ' FOR UPDATE'),(str(delivery_id),user['user_id'])).fetchone()
-            if not raw:
-                deny('NOT_FOUND','delivery_missing')
-            row=plain(raw)
-            request.state.audit_references=[('approval',row['approval_id'])]
-            if file_id:
-                request.state.audit_references.append(('requested_file',str(file_id)))
-            if row['revoked_at']:
-                deny('ACCESS_DENIED','approval_revoked')
-            approved=fetch_file(db,row['approved_file_id'])
-            consent=release_check(db,row,approved)
-            if approved['export_banned']:
-                deny('ACCESS_DENIED','approved_file_banned')
-            record=ApprovedDelivery(str(delivery_id),row['recipient_id'],row['request_status'],
-                min(stamp(row['expires_at']),stamp(row['approval_expires_at']),stamp(consent['expires_at'])),
-                row['approved_file_id'],row['approved_file_version'],row['approved_file_hash'],True)
-            stored=StoredFile(approved['file_id'],approved['file_version'],approved['file_hash'],approved['scan_status'])
-            # Always enforce the common approval eligibility checks, even in baseline.
-            # Upstream baseline=True would skip consent/expiry and is intentionally NOT used.
-            problem=delivery_problem(record,stored,requester_id=user['user_id'],now=now(),
-                requested_file_id=str(file_id) if file_id and config['mode']=='enforce' else None,baseline=False)
-            if problem:
-                deny(problem[0].value,problem[1])
+            row,approved=eligible(db,request,delivery_id,user,file_id)
+            # 판단을 모두 통과한 뒤 토큰을 소비한다 (승인 외 파일 요청은 토큰과 무관하게 먼저 '승인 불일치'로 거부·보고)
+            if config['download_tokens'] and config['mode']=='enforce':
+                consume_token(db,delivery_id,user,token)
             approved_bytes=bytes_for(approved)
             selected=fetch_file(db,file_id) if config['mode']=='baseline' and file_id else approved
             swapped=selected['file_id']!=approved['file_id']
-            content=bytes_for(selected) if selected['file_id']!=approved['file_id'] else approved_bytes
-            db.execute('UPDATE deliveries SET downloaded_at=%s WHERE delivery_id=%s',(now(),str(delivery_id)))
-        audit.record(request,'delivery.download',reason='baseline_file_binding_omitted' if config['mode']=='baseline' else None,target=str(delivery_id))
+            content=bytes_for(selected) if swapped else approved_bytes
+            count=int(row.get('download_count') or 0)+1
+            db.execute('UPDATE deliveries SET downloaded_at=%s,download_count=%s WHERE delivery_id=%s',(now(),count,str(delivery_id)))
+        audit.record(request,'delivery.download',reason='baseline_file_binding_omitted' if config['mode']=='baseline' else f'download_{count}',
+                     target=str(delivery_id),file_id=selected['file_id'],file_hash=hashlib.sha256(content).hexdigest())
         if swapped:   # baseline: 막지 못했지만 탐지는 한다 → '차단 안 됨' 보안 사건
             report_mismatch(request,'requested_file_not_approved',False)
         return Response(content,media_type='application/json' if selected['scan_status']=='passed' else 'text/csv',
@@ -417,6 +486,7 @@ def create_app(config=None, identity=None, database=None, internal=None):
             for row in rows:
                 db.execute('UPDATE approvals SET revoked_at=%s WHERE approval_id=%s',(now(),str(row['approval_id'])))
                 db.execute("UPDATE export_requests SET request_status='revoked' WHERE request_id=%s",(str(row['request_id']),))
+                drop_tokens(db,approval_id=str(row['approval_id']))
         audit.record(request,'security.revoke_deliveries',reason=f'revoked_{len(rows)}',target=str(user_id),target_type='user')
         if rows:notify(request,[str(user_id)],'release_revoked')
         return {'recipient_id':str(user_id),'revoked':len(rows)}

@@ -114,7 +114,7 @@ def prepare():
     for wodle in conf.findall('wodle'):
         disabled=wodle.find('disabled')
         if disabled is not None:disabled.text='yes'
-    for name in ('internal-api','transfer-api','external-api'):
+    for name in ('internal-api','transfer-api','external-api','audit-verifier'):
         entry=ET.SubElement(conf,'localfile')
         ET.SubElement(entry,'log_format').text='json'
         ET.SubElement(entry,'location').text='/var/log/matchmaking/'+name+'.json'
@@ -269,6 +269,8 @@ def event(service='internal-api',action='POST /api/admin/member-exports',result=
 
 def cases():
     batch_actor='U-LAB-'+secrets.token_hex(5)
+    dl='LAB-DELIVERY-'+secrets.token_hex(5)
+    kc_user='kc-lab-'+secrets.token_hex(4)
     return [(event(actor=batch_actor),'100110'),(event(actor=batch_actor),'100110'),(event(actor=batch_actor),'100112'),
         (event(service='transfer-api',action='GET /api/internal/deliveries/{delivery_id}/download',reason='requested_file_not_approved'),'100111'),
         (event(service='transfer-api',reason='actual_file_hash_mismatch'),'100120'),
@@ -282,7 +284,23 @@ def cases():
         (event(action='security.auto_lock',result='allow',reason='repeated_role_denials',actor='system',target_id='U-LAB-B'),'100150'),
         (event(action='GET /api/members',reason='account_temporarily_locked',actor='U-LAB-C'),'100151'),
         (event(action='security.suspend_account',result='allow',reason='keycloak_done',actor='U-LAB-D',target_id='U-LAB-C'),'100152'),
-        (event(service='transfer-api',action='security.report',result='error',reason='security_report_failed',actor='U-LAB-E'),'100153')]
+        (event(service='transfer-api',action='security.report',result='error',reason='security_report_failed',actor='U-LAB-E'),'100153'),
+        (event(service='audit-verifier',action='audit.chain_verify',result='error',reason='audit_chain_broken',actor='system',target_id='transfer-api.json'),'100160'),
+        (event(service='audit-verifier',action='audit.chain_verify',result='error',reason='audit_collection_stale',actor='system',target_id='external-api.json'),'100161'),
+        (event(service='transfer-api',action='GET /api/internal/deliveries/{delivery_id}/download',reason='consent_invalid',actor='U-LAB-F'),'100170'),
+        (event(service='transfer-api',action='POST /api/export-requests/{request_id}/approve',reason='self_approval',actor='U-LAB-G'),'100171'),
+        (event(service='transfer-api',action='POST /api/export-requests',reason='file_not_eligible',actor='U-LAB-H'),'100172'),
+        (event(service='transfer-api',action='GET /api/internal/deliveries/{delivery_id}/download',reason='download_token_used',actor='U-LAB-I'),'100173'),
+        (event(service='transfer-api',action='POST /api/internal/deliveries/{delivery_id}/download-tokens',reason='download_limit_reached',actor='U-LAB-J'),'100174'),
+        (event(service='transfer-api',action='delivery.download',result='allow',reason='download_1',actor='U-LAB-K',target_id=dl),'100176'),
+        (event(service='transfer-api',action='delivery.download',result='allow',reason='download_2',actor='U-LAB-K',target_id=dl),'100176'),
+        (event(service='transfer-api',action='delivery.download',result='allow',reason='download_3',actor='U-LAB-K',target_id=dl),'100175'),
+        (event(action='GET /api/members/{member_id}',reason='member_not_assigned',actor='U-LAB-L'),'100177'),
+        *[(event(action='keycloak.login_error',reason='invalid_user_credentials',actor=kc_user),'100180') for _ in range(4)],
+        (event(action='keycloak.login_error',reason='invalid_user_credentials',actor=kc_user),'100181'),
+        (event(action='keycloak.login_error',reason='user_temporarily_disabled',actor='kc-lab-other'),'100182'),
+        (event(action='keycloak.admin_event',result='allow',reason='create_realm_role_mapping',actor='kc-admin-lab',target_id='users/x/role-mappings/realm'),'100183'),
+        (event(action='keycloak.admin_event',result='allow',reason='create_realm_role_mapping',actor='svc:internal-admin',target_id='users/y/role-mappings/realm'),'100102')]
 
 
 def rules():
@@ -296,7 +314,7 @@ def rules():
         print(json.dumps({'expected':expected,'actual':found}))
         print('Wazuh logtest diagnostic output (synthetic test events only):\n'+output[-16000:])
         raise RuntimeError('Wazuh rule-engine test failed; do not claim validated rules')
-    print('Actual Wazuh logtest passed for attack, 3-request threshold and normal cases.')
+    print('Actual Wazuh logtest passed for attack, threshold, integrity, download, Keycloak and normal cases.')
 
 
 def smoke():

@@ -70,7 +70,8 @@ def fixture_schema(path):
     CREATE TABLE approvals(approval_id TEXT PRIMARY KEY,request_id TEXT UNIQUE NOT NULL REFERENCES export_requests,requester_id TEXT NOT NULL,
       approver_id TEXT NOT NULL,approved_file_id TEXT NOT NULL,approved_file_version INT NOT NULL,approved_file_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,revoked_at TEXT,created_at TEXT NOT NULL,CHECK(approver_id<>requester_id));
-    CREATE TABLE deliveries(delivery_id TEXT PRIMARY KEY,approval_id TEXT NOT NULL REFERENCES approvals,recipient_id TEXT NOT NULL,downloaded_at TEXT,created_at TEXT NOT NULL);
+    CREATE TABLE deliveries(delivery_id TEXT PRIMARY KEY,approval_id TEXT NOT NULL REFERENCES approvals,recipient_id TEXT NOT NULL,downloaded_at TEXT,created_at TEXT NOT NULL,download_count INT NOT NULL DEFAULT 0);
+    CREATE TABLE download_tokens(token_hash TEXT PRIMARY KEY,delivery_id TEXT NOT NULL REFERENCES deliveries,recipient_id TEXT NOT NULL,created_at TEXT NOT NULL,expires_at TEXT NOT NULL,used_at TEXT);
     CREATE TABLE audit_log(id INTEGER PRIMARY KEY,ts TEXT NOT NULL,trace_id TEXT NOT NULL,actor TEXT,role TEXT,action TEXT NOT NULL,
       target_type TEXT,target_id TEXT,result TEXT NOT NULL,reason TEXT);
     ''')
@@ -519,3 +520,94 @@ def test_admin_revokes_all_deliveries_of_member(env):
     assert env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download').status_code==403
     again=env['t'].post(f'/api/security/recipients/{B}/revoke-deliveries',headers=headers('ADMIN'),json={})
     assert again.json()['revoked']==0
+
+
+# ---------- 안전한 반출: 일회용 다운로드 토큰 · 다운로드 횟수 제한 · 공통 감사 형식 ----------
+def csrf(env):
+    return {'X-CSRF-Token':env['e'].get('/api/me').json()['csrf_token'],'Origin':'https://testserver'}
+
+
+def token_for(env,delivery_id):
+    r=env['e'].post(f'/api/me/deliveries/{delivery_id}/download-token',headers=csrf(env))
+    assert r.status_code==201,r.text
+    return r.json()
+
+
+def secure(env,limit=3):
+    env['cfg']['download_tokens']=True;env['cfg']['max_downloads']=limit
+
+
+def test_download_requires_one_time_token(env):
+    secure(env);d,f=approved(env);login(env)
+    url=f'/api/me/deliveries/{d["delivery_id"]}/download'
+    r=env['e'].get(url)
+    assert r.status_code==403 and r.json()['error']['code']=='ACCESS_DENIED'
+    t=token_for(env,d['delivery_id'])
+    assert t['required'] and t['expires_in']==60 and len(t['token'])>=40
+    ok=env['e'].get(url,headers={'X-Download-Token':t['token']})
+    assert ok.status_code==200 and json.loads(ok.content)['member_id']==M
+    again=env['e'].get(url,headers={'X-Download-Token':t['token']})          # 재사용 차단
+    assert again.status_code==403 and '이미 사용한' in again.json()['error']['message']
+    log=(env['root']/'transfer.jsonl').read_text()
+    assert 'download_token_required' in log and 'download_token_used' in log and t['token'] not in log
+
+
+def test_token_is_bound_to_delivery_and_expires(env):
+    secure(env);d1,_=approved(env);d2,_=approved(env);login(env)
+    t=token_for(env,d1['delivery_id'])
+    other=env['e'].get(f'/api/me/deliveries/{d2["delivery_id"]}/download',headers={'X-Download-Token':t['token']})
+    assert other.status_code==403
+    env['cfg']['download_token_ttl']=-1
+    stale=token_for(env,d1['delivery_id'])
+    r=env['e'].get(f'/api/me/deliveries/{d1["delivery_id"]}/download',headers={'X-Download-Token':stale['token']})
+    assert r.status_code==403 and '만료' in r.json()['error']['message']
+
+
+def test_new_token_replaces_old_and_revoke_drops_tokens(env):
+    secure(env);d,_=approved(env);login(env)
+    url=f'/api/me/deliveries/{d["delivery_id"]}/download'
+    first=token_for(env,d['delivery_id']);second=token_for(env,d['delivery_id'])
+    assert env['e'].get(url,headers={'X-Download-Token':first['token']}).status_code==403
+    pending=token_for(env,d['delivery_id'])
+    env['t'].post(f'/api/approvals/{d["approval_id"]}/revoke',headers=headers('APPROVER'),json={})
+    assert env['e'].get(url,headers={'X-Download-Token':pending['token']}).status_code==403
+    assert env['e'].post(f'/api/me/deliveries/{d["delivery_id"]}/download-token',headers=csrf(env)).status_code==403   # 회수 후 발급도 거부
+
+
+def test_download_limit(env):
+    secure(env,limit=2);d,_=approved(env);login(env)
+    url=f'/api/me/deliveries/{d["delivery_id"]}/download'
+    for _ in range(2):
+        assert env['e'].get(url,headers={'X-Download-Token':token_for(env,d['delivery_id'])['token']}).status_code==200
+    item=env['e'].get('/api/me/deliveries').json()['items'][0]
+    assert item['download_count']==2 and item['download_limit']==2
+    r=env['e'].post(f'/api/me/deliveries/{d["delivery_id"]}/download-token',headers=csrf(env))
+    assert r.status_code==403 and '최대 2회' in r.json()['error']['message']
+    assert 'download_limit_reached' in (env['root']/'transfer.jsonl').read_text()
+
+
+def test_attack2_still_reported_as_mismatch_with_tokens(env):
+    secure(env);d,_=approved(env);private=upload(env,b'name,phone\nSYNTHETIC,010-0000-0000');login(env)
+    r=env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download',params={'file_id':private['file_id']})
+    assert r.status_code==403 and r.json()['error']['code']=='APPROVAL_MISMATCH'
+    assert env['state']['security_events'][0]['reason']=='requested_file_not_approved'
+
+
+def test_baseline_skips_token_and_limit(env):
+    secure(env,limit=1);d,_=approved(env);env['cfg']['mode']='baseline';login(env)
+    url=f'/api/me/deliveries/{d["delivery_id"]}/download'
+    assert env['e'].get(url).status_code==200 and env['e'].get(url).status_code==200
+    assert env['e'].post(f'/api/me/deliveries/{d["delivery_id"]}/download-token',headers=csrf(env)).json()['required'] is False
+
+
+def test_audit_lines_have_standard_fields_and_chain(env):
+    from privacygate.audit import POLICY_VERSION, verify_chain
+    secure(env);d,f=approved(env);login(env)
+    env['e'].get(f'/api/me/deliveries/{d["delivery_id"]}/download',headers={'X-Download-Token':token_for(env,d['delivery_id'])['token']})
+    lines=(env['root']/'transfer.jsonl').read_text().splitlines()
+    assert verify_chain(lines)==[]
+    dl=[json.loads(l) for l in lines if '"delivery.download"' in l][-1]
+    assert dl['policy_version']==POLICY_VERSION and dl['owner_id']==M and dl['recipient_id']==B
+    assert dl['approval_id']==d['approval_id'] and dl['file_id']==f['file_id'] and dl['file_hash']==f['file_hash']
+    req=[json.loads(l) for l in lines if '"release.approved"' in l][-1]
+    assert req['consent_id'] and req['file_hash']==f['file_hash']

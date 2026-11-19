@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, File, Form, Request, UploadFile
+from fastapi import Depends, File, Form, Header, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from privacygate.errors import GateError
 from privacygate.session_rules import csrf_problem
@@ -143,9 +143,9 @@ def create_app(config=None, identity=None, upstream=None):
         audit.record(request,'logout')
         return response
 
-    def relay(request, method, path, **kwargs):
+    def relay(request, method, path, extra_headers=None, **kwargs):
         headers = {'Authorization':'Bearer '+identity.service(config['service_id'],config['service_secret']),
-                   'X-User-Token':request.state.tokens['access_token'],'X-Trace-Id':request.state.trace_id}
+                   'X-User-Token':request.state.tokens['access_token'],'X-Trace-Id':request.state.trace_id,**(extra_headers or {})}
         try:
             result = upstream.request(method,path,headers=headers,**kwargs)
         except httpx.HTTPError:
@@ -174,9 +174,18 @@ def create_app(config=None, identity=None, upstream=None):
     def deliveries(request: Request, user=Depends(current)):
         return relay(request,'POST','/api/internal/delivery-queries',json={}).json()
 
+    @app.post('/api/me/deliveries/{delivery_id}/download-token',status_code=201)
+    def download_token(delivery_id: UUID, request: Request, user=Depends(current)):
+        """일회용 다운로드 토큰 (중계가 발급, 60초·1회). 회원 화면이 내려받기 직전에 받는다."""
+        result=relay(request,'POST',f'/api/internal/deliveries/{delivery_id}/download-tokens',json={})
+        audit.record(request,'delivery.token_issue',target=str(delivery_id))
+        return result.json()
+
     @app.get('/api/me/deliveries/{delivery_id}/download')
-    def download(delivery_id: UUID, request: Request, file_id: UUID | None=None, user=Depends(current)):
-        result=relay(request,'GET',f'/api/internal/deliveries/{delivery_id}/download',params={'file_id':str(file_id)} if file_id else {})
+    def download(delivery_id: UUID, request: Request, file_id: UUID | None=None, user=Depends(current),
+                 token: str | None=Header(None,alias='X-Download-Token',max_length=128)):
+        result=relay(request,'GET',f'/api/internal/deliveries/{delivery_id}/download',params={'file_id':str(file_id)} if file_id else {},
+                     extra_headers={'X-Download-Token':token} if token else None)
         audit.record(request,'delivery.download',target=str(delivery_id))
         extension='json' if result.headers.get('content-type','').startswith('application/json') else 'csv'
         return Response(result.content,media_type=result.headers.get('content-type','application/octet-stream'),

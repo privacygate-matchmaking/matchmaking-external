@@ -58,11 +58,15 @@ class Audit:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.writer = AuditWriter(service, str(path), db_insert=insert)
 
-    def record(self, request, action, result='allow', reason=None, target=None, target_type='delivery'):
+    def record(self, request, action, result='allow', reason=None, target=None, target_type='delivery', **detail):
+        """detail: 공통 형식의 자료 제공 필드 (owner_id·recipient_id·consent_id·approval_id·file_id·file_hash).
+        넘기지 않으면 request.state.audit_detail(판단 중 모은 값)을 쓴다 → 거부 기록에도 같은 필드가 남는다."""
         principal = getattr(request.state, 'principal', {})
+        fields = {**getattr(request.state, 'audit_detail', {}), **detail}
+        fields = {k: str(v) for k, v in fields.items() if v is not None}
         self.writer.record(trace_id=request.state.trace_id, action=action, result=result,
                            actor=principal.get('pseudo_id'), role=principal.get('role'),
-                           target_type=target_type if target else None, target_id=target, reason=reason)
+                           target_type=target_type if target else None, target_id=target, reason=reason, **fields)
 
 
 def application(title, audit, on_deny=None):

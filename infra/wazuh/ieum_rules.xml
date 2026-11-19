@@ -127,4 +127,106 @@
     <description>IEUM transfer could not report an attack-2 incident to internal; review transfer audit</description>
     <group>ieum_response,ieum_operations,</group>
   </rule>
+  <!-- 감사 로그 위변조·수집 상태 (privacygate/infra/scripts/audit-verify.sh 결과) -->
+  <rule id="100159" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="service">^audit-verifier$</field>
+    <description>IEUM audit chain verifier</description>
+  </rule>
+  <rule id="100160" level="13">
+    <if_sid>100159</if_sid>
+    <field name="reason">^audit_chain_broken$</field>
+    <description>IEUM audit log tampering detected (hash chain broken): $(target_id)</description>
+    <group>ieum_integrity,ieum_audit_tamper,</group>
+  </rule>
+  <rule id="100161" level="10">
+    <if_sid>100159</if_sid>
+    <field name="reason" type="pcre2">^(audit_file_missing|audit_collection_stale)$</field>
+    <description>IEUM audit log missing or collection stopped: $(target_id) ($(reason))</description>
+    <group>ieum_integrity,ieum_operations,</group>
+  </rule>
+  <!-- 자료 제공 정책 위반 시도 -->
+  <rule id="100170" level="8">
+    <if_sid>100101</if_sid>
+    <field name="service">^transfer-api$</field>
+    <field name="reason" type="pcre2">^(consent_invalid|consent_expired|consent_ends_before_delivery|consent_expiry_changed|matching_grant_inactive|matching_grant_missing|approval_revoked)$</field>
+    <description>IEUM use of revoked or expired consent/approval: $(actor) ($(reason))</description>
+    <group>ieum_consent,</group>
+  </rule>
+  <rule id="100171" level="10">
+    <if_sid>100101</if_sid>
+    <field name="reason">^self_approval$</field>
+    <description>IEUM requester tried to approve own export request: $(actor)</description>
+    <group>ieum_separation_of_duties,</group>
+  </rule>
+  <rule id="100172" level="8">
+    <if_sid>100101</if_sid>
+    <field name="reason" type="pcre2">^(scan_pending|scan_blocked|scan_error|file_not_eligible|masked_copy_missing|approved_file_banned)$</field>
+    <description>IEUM request for material not reviewed or masked: $(actor) ($(reason))</description>
+    <group>ieum_review,</group>
+  </rule>
+  <rule id="100173" level="9">
+    <if_sid>100101</if_sid>
+    <field name="service">^transfer-api$</field>
+    <field name="reason" type="pcre2">^download_token_(used|invalid|expired|required)$</field>
+    <description>IEUM one-time download token misuse: $(actor) ($(reason))</description>
+    <group>ieum_download,</group>
+  </rule>
+  <rule id="100174" level="8">
+    <if_sid>100101</if_sid>
+    <field name="reason">^download_limit_reached$</field>
+    <description>IEUM download limit reached: $(actor) $(target_id)</description>
+    <group>ieum_download,</group>
+  </rule>
+  <rule id="100176" level="3">
+    <if_sid>100102</if_sid>
+    <field name="service">^transfer-api$</field>
+    <action type="pcre2">^delivery\.download$</action>
+    <description>IEUM material downloaded: $(actor) $(target_id)</description>
+    <group>ieum_download,</group>
+  </rule>
+  <rule id="100175" level="8" frequency="3" timeframe="300">
+    <if_matched_sid>100176</if_matched_sid>
+    <same_field>target_id</same_field>
+    <different_field>trace_id</different_field>
+    <description>IEUM same material downloaded 3 times in 5 minutes: $(actor) $(target_id)</description>
+    <group>ieum_download,ieum_repeated,</group>
+  </rule>
+  <rule id="100177" level="8">
+    <if_sid>100101</if_sid>
+    <field name="service">^internal-api$</field>
+    <field name="reason" type="pcre2">^(member_not_assigned|member_not_in_scope|evidence_not_in_scope|export_not_owned)$</field>
+    <description>IEUM staff accessed member outside assignment: $(actor) ($(reason))</description>
+    <group>ieum_scope,</group>
+  </rule>
+  <!-- Keycloak 로그인·관리 이벤트 (internal-api 가 Keycloak 이벤트를 감사 로그로 옮김) -->
+  <rule id="100180" level="5">
+    <if_sid>100101</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^keycloak\.(login_error|code_to_token_error|refresh_token_error)$</action>
+    <description>IEUM Keycloak login failure: $(actor) ($(reason))</description>
+    <group>ieum_auth,</group>
+  </rule>
+  <rule id="100182" level="10">
+    <if_sid>100180</if_sid>
+    <field name="reason">^user_temporarily_disabled$</field>
+    <description>IEUM Keycloak brute-force lockout: $(actor)</description>
+    <group>ieum_auth,</group>
+  </rule>
+  <rule id="100181" level="10" frequency="5" timeframe="120">
+    <if_matched_sid>100180</if_matched_sid>
+    <same_field>actor</same_field>
+    <different_field>trace_id</different_field>
+    <description>IEUM repeated Keycloak login failures: same account 5 times in 2 minutes ($(actor))</description>
+    <group>ieum_auth,ieum_repeated,</group>
+  </rule>
+  <rule id="100183" level="10">
+    <if_sid>100102</if_sid>
+    <field name="service">^internal-api$</field>
+    <action type="pcre2">^keycloak\.admin_event$</action>
+    <field name="reason" type="pcre2">(realm_role_mapping|client_role_mapping|group_membership|_realm_role$|_client_role$)</field>
+    <field name="actor" type="pcre2">^(?!svc:internal-admin$).+</field>
+    <description>IEUM Keycloak role or group change by administrator: $(actor) $(reason) $(target_id)</description>
+    <group>ieum_auth,ieum_admin_change,</group>
+  </rule>
 </group>
